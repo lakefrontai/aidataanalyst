@@ -1,0 +1,15 @@
+[MASTER]
+# Ignore generated/vendored paths
+ignore=web,build,dist
+
+[MESSAGES CONTROL]
+# R0801: duplicate-code — connectors intentionally share structural patterns
+# W0212: protected-access — session._history access in main.py CLI is intentional
+disable=R0801,W0212
+
+[FORMAT]
+max-line-length=120
+
+[DESIGN]
+max-args=10
+max-attributes=12

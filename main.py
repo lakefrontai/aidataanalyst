@@ -13,8 +13,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.syntax import Syntax
 from rich.markdown import Markdown
-from rich import print as rprint
-
 from config import config
 from bedrock_client import BedrockMistralClient
 from fabric_client import FabricClient

@@ -9,8 +9,7 @@ tokens and improving SQL accuracy.
 
 import json
 import re
-from typing import List, Tuple, Optional, Dict
-import numpy as np
+from typing import List, Optional, Dict
 import psycopg2
 import psycopg2.extras
 import boto3
@@ -75,10 +74,10 @@ class SchemaVectorStore:
         aws_region: str = "us-east-1",
         embed_model: str = _DEFAULT_EMBED_MODEL,
     ):
-        self._pg_kwargs = dict(
-            host=host, port=port, dbname=database,
-            user=user, password=password, sslmode=sslmode,
-        )
+        self._pg_kwargs = {
+            "host": host, "port": port, "dbname": database,
+            "user": user, "password": password, "sslmode": sslmode,
+        }
         self._conn: Optional[psycopg2.extensions.connection] = None
 
         self._bedrock = boto3.client(
@@ -92,11 +91,13 @@ class SchemaVectorStore:
     # ── Connection ────────────────────────────────────────────────────────────
 
     def connect(self) -> None:
+        """Open pgvector connection and ensure schema exists."""
         self._conn = psycopg2.connect(**self._pg_kwargs, connect_timeout=30)
         self._conn.autocommit = True
         self._ensure_schema()
 
     def disconnect(self) -> None:
+        """Close the pgvector connection."""
         if self._conn:
             self._conn.close()
             self._conn = None
@@ -155,8 +156,7 @@ class SchemaVectorStore:
             # Extract embedding from model-specific response shape
             if "cohere" in model:
                 return data["embeddings"][0]   # Cohere returns list of lists
-            else:
-                return data["embedding"]        # Titan / Nova
+            return data["embedding"]            # Titan / Nova
         except ClientError as e:
             raise RuntimeError(f"Embedding error [{model}]: {e}") from e
 
@@ -244,6 +244,7 @@ class SchemaVectorStore:
             return [dict(r) for r in cur.fetchall()]
 
     def count(self, db_label: str) -> int:
+        """Return the number of indexed tables for a given db_label."""
         with self._conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM ai_analyst_schema_embeddings WHERE db_label = %s",
