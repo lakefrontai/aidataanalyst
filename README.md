@@ -8,6 +8,7 @@ Ask questions about your data in plain English. The app writes the SQL, runs it,
 
 ---
 
+
 ## What it does
 
 ```
