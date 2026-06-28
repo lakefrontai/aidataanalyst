@@ -17,19 +17,33 @@ import boto3
 from botocore.exceptions import ClientError
 
 
-# Titan Text Embeddings v2 — 1024-dim, works on all Bedrock regions
+# Default embedding model
 _DEFAULT_EMBED_MODEL = "amazon.titan-embed-text-v2:0"
-_EMBED_DIM = 1024
 
-_DDL = """
+# Known output dimensions per model — fallback 1024
+_MODEL_DIMS = {
+    "amazon.titan-embed-text-v2:0":    1024,
+    "amazon.titan-embed-text-v1":      1536,
+    "amazon.titan-embed-image-v1":     1024,
+    "cohere.embed-english-v3":         1024,
+    "cohere.embed-multilingual-v3":    1024,
+    "amazon.nova-embed-text-v1:0":     1024,
+}
+
+def _dim_for(model_id: str) -> int:
+    return _MODEL_DIMS.get(model_id, 1024)
+
+# DDL template — dimension inserted at connect time
+_DDL_TEMPLATE = """
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS ai_analyst_schema_embeddings (
     id            SERIAL PRIMARY KEY,
     db_label      TEXT        NOT NULL,
-    table_fqn     TEXT        NOT NULL,   -- e.g. public.disputes
-    schema_text   TEXT        NOT NULL,   -- full DDL-like text for this table
+    table_fqn     TEXT        NOT NULL,
+    schema_text   TEXT        NOT NULL,
     embedding     vector({dim}) NOT NULL,
+    embed_model   TEXT        NOT NULL DEFAULT '',
     indexed_at    TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (db_label, table_fqn)
 );
@@ -38,7 +52,7 @@ CREATE INDEX IF NOT EXISTS ai_analyst_schema_emb_idx
     ON ai_analyst_schema_embeddings
     USING ivfflat (embedding vector_cosine_ops)
     WITH (lists = 10);
-""".format(dim=_EMBED_DIM)
+"""
 
 
 class SchemaVectorStore:
@@ -88,25 +102,63 @@ class SchemaVectorStore:
             self._conn = None
 
     def _ensure_schema(self) -> None:
-        with self._conn.cursor() as cur:
-            cur.execute(_DDL)
+        dim = _dim_for(self.embed_model)
+        ddl = _DDL_TEMPLATE.format(dim=dim)
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(ddl)
+        except Exception as e:
+            msg = str(e)
+            if "extension" in msg and "vector" in msg:
+                raise RuntimeError(
+                    "pgvector extension is not installed on this PostgreSQL server.\n\n"
+                    "Fix for EnterpriseDB PostgreSQL 18 (your setup):\n"
+                    "  cd /tmp && git clone --branch v0.8.3 https://github.com/pgvector/pgvector.git\n"
+                    "  cd /tmp/pgvector\n"
+                    "  sudo PG_CONFIG=/Library/PostgreSQL/18/bin/pg_config make install\n"
+                    "  psql -U postgres -c 'CREATE EXTENSION IF NOT EXISTS vector;'\n\n"
+                    "For AWS RDS: just run CREATE EXTENSION IF NOT EXISTS vector; in your DB.\n"
+                    "See the 'How to install pgvector' section in the Vector Store tab."
+                ) from e
+            raise
 
     # ── Embedding ─────────────────────────────────────────────────────────────
 
     def _embed(self, text: str) -> List[float]:
-        """Call Bedrock Titan Embeddings and return a float vector."""
-        body = json.dumps({"inputText": text[:8000]})  # Titan max input
+        """Call a Bedrock embedding model and return a float vector.
+        Handles Titan, Cohere, and Nova request/response formats."""
+        model = self.embed_model
+
+        if "cohere" in model:
+            # Cohere Embed: texts array + input_type
+            payload = {
+                "texts": [text[:2048]],
+                "input_type": "search_document",
+                "truncate": "END",
+            }
+        elif "nova-embed" in model:
+            # Amazon Nova Embed
+            payload = {"inputText": text[:8000]}
+        else:
+            # Amazon Titan (v1, v2)
+            payload = {"inputText": text[:8000]}
+
         try:
             resp = self._bedrock.invoke_model(
-                modelId=self.embed_model,
-                body=body,
+                modelId=model,
+                body=json.dumps(payload),
                 contentType="application/json",
                 accept="application/json",
             )
             data = json.loads(resp["body"].read())
-            return data["embedding"]
+
+            # Extract embedding from model-specific response shape
+            if "cohere" in model:
+                return data["embeddings"][0]   # Cohere returns list of lists
+            else:
+                return data["embedding"]        # Titan / Nova
         except ClientError as e:
-            raise RuntimeError(f"Embedding error: {e}") from e
+            raise RuntimeError(f"Embedding error [{model}]: {e}") from e
 
     # ── Index schema ──────────────────────────────────────────────────────────
 
@@ -127,14 +179,15 @@ class SchemaVectorStore:
                 vec_str = "[" + ",".join(str(v) for v in vec) + "]"
                 cur.execute("""
                     INSERT INTO ai_analyst_schema_embeddings
-                        (db_label, table_fqn, schema_text, embedding)
-                    VALUES (%s, %s, %s, %s::vector)
+                        (db_label, table_fqn, schema_text, embedding, embed_model)
+                    VALUES (%s, %s, %s, %s::vector, %s)
                     ON CONFLICT (db_label, table_fqn)
                     DO UPDATE SET
                         schema_text = EXCLUDED.schema_text,
                         embedding   = EXCLUDED.embedding,
+                        embed_model = EXCLUDED.embed_model,
                         indexed_at  = NOW()
-                """, (db_label, table_fqn, table_text, vec_str))
+                """, (db_label, table_fqn, table_text, vec_str, self.embed_model))
                 count += 1
         return count
 
