@@ -631,11 +631,57 @@ with tab_vs:
             unsafe_allow_html=True,
         )
 
+    # ── pgvector install instructions ─────────────────────────────────────────
+    with st.expander("📋 **How to install pgvector** *(expand if you see an extension error)*",
+                     expanded=False):
+        st.markdown("""
+**pgvector** adds vector similarity search to PostgreSQL. It must be installed on the machine running your PostgreSQL server.
+
+---
+
+**macOS — EnterpriseDB PostgreSQL (your setup)**
+```bash
+# 1. Build from source for your PG version
+cd /tmp && git clone --branch v0.8.3 https://github.com/pgvector/pgvector.git
+cd /tmp/pgvector
+
+# 2. Install (requires sudo — EDB installs to /Library/PostgreSQL/)
+sudo PG_CONFIG=/Library/PostgreSQL/18/bin/pg_config make install
+
+# 3. Enable in your database (run once per database)
+psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+**macOS — Homebrew PostgreSQL**
+```bash
+brew install pgvector
+psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+**AWS RDS / Aurora PostgreSQL**
+```sql
+-- Just run this in your database (pgvector is pre-installed on RDS):
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+**Linux (Ubuntu/Debian)**
+```bash
+sudo apt install postgresql-16-pgvector   # change 16 to your PG version
+psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+**Docker**
+```bash
+# Use the official pgvector image
+docker run -e POSTGRES_PASSWORD=pass -p 5432:5432 pgvector/pgvector:pg17
+```
+        """)
+
     # ── pgvector connection ───────────────────────────────────────────────────
     with st.expander("🐘 pgvector PostgreSQL connection", expanded=not vs_connected):
         s = st.session_state.vs_saved
         st.caption("Can be the same Postgres as your data DB, or a dedicated one. "
-                   "Needs the `vector` extension (`CREATE EXTENSION vector;`).")
+                   "Run `CREATE EXTENSION IF NOT EXISTS vector;` in the target database first.")
         v1, v2 = st.columns(2)
         with v1:
             vs_host = st.text_input("Host", value=s.get("host","localhost"), key="vs_host")
@@ -650,16 +696,38 @@ with tab_vs:
                 index=["disable","prefer","require"].index(s.get("sslmode","disable")),
                 key="vs_ssl")
 
-        st.markdown("**Embedding model** (Amazon Titan or Cohere Embed via Bedrock)")
-        embed_options = [
-            "amazon.titan-embed-text-v2:0",
-            "amazon.titan-embed-text-v1",
-            "cohere.embed-english-v3",
-            "cohere.embed-multilingual-v3",
-        ]
-        vs_embed = st.selectbox("Embedding model", embed_options,
-            index=embed_options.index(s.get("embed_model","amazon.titan-embed-text-v2:0")),
-            key="vs_embed_model")
+        st.markdown("**Embedding model** (via AWS Bedrock)")
+
+        EMBED_MODELS = {
+            # Amazon Titan
+            "amazon.titan-embed-text-v2:0":         ("Amazon", "Titan Text Embeddings v2",       1024, "Best balance of quality and cost. Recommended."),
+            "amazon.titan-embed-text-v1":            ("Amazon", "Titan Text Embeddings v1",        1536, "Older Titan model, higher dimensionality."),
+            "amazon.titan-embed-image-v1":           ("Amazon", "Titan Multimodal Embeddings",     1024, "Supports text + image inputs."),
+            # Cohere
+            "cohere.embed-english-v3":               ("Cohere", "Embed English v3",                1024, "High quality English-only embeddings."),
+            "cohere.embed-multilingual-v3":          ("Cohere", "Embed Multilingual v3",           1024, "100+ languages. Use if your schema/data is non-English."),
+            # AWS-native
+            "amazon.nova-embed-text-v1:0":           ("Amazon", "Nova Embed Text v1",              1024, "Latest Amazon Nova embedding model."),
+        }
+
+        embed_options = list(EMBED_MODELS.keys())
+        default_embed = s.get("embed_model", "amazon.titan-embed-text-v2:0")
+        if default_embed not in embed_options:
+            default_embed = embed_options[0]
+
+        vs_embed = st.selectbox(
+            "Embedding model",
+            embed_options,
+            index=embed_options.index(default_embed),
+            format_func=lambda mid: f"{EMBED_MODELS[mid][0]} — {EMBED_MODELS[mid][1]} ({EMBED_MODELS[mid][2]}d)",
+            key="vs_embed_model",
+        )
+        if vs_embed in EMBED_MODELS:
+            info = EMBED_MODELS[vs_embed]
+            st.caption(f"📐 **{info[2]} dimensions** · {info[3]}")
+
+        # Warn if chosen embed dim differs from what's already indexed
+        chosen_dim = EMBED_MODELS.get(vs_embed, (None,None,1024))[2]
 
         ca, cb = st.columns([3,1])
         with ca:
