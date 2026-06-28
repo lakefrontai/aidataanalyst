@@ -1,6 +1,6 @@
 # AI Data Analyst
 
-Ask questions about your data in plain English. The app writes the SQL, runs it, and explains the results — powered by any model on **AWS Bedrock** and connected to your choice of database.
+Ask questions about your data in plain English. The app writes the SQL, runs it, and explains the results — powered by any model on **AWS Bedrock**, connected to **multiple databases simultaneously**.
 
 ![Python 3.9+](https://img.shields.io/badge/Python-3.9+-blue)
 ![Streamlit](https://img.shields.io/badge/UI-Streamlit-red)
@@ -20,6 +20,8 @@ Your database runs the query
 AI summarises the results in plain English + auto chart
 ```
 
+You can keep **multiple databases connected at once** and switch between them in a single dropdown — no need to disconnect and reconnect.
+
 ---
 
 ## Supported databases
@@ -30,6 +32,7 @@ AI summarises the results in plain English + auto chart
 | 🏭 Microsoft Fabric | Service principal or username/password |
 | 🐘 AWS RDS PostgreSQL | Password + SSL |
 | 💻 Local PostgreSQL | Password |
+| 🐬 MySQL / Aurora MySQL | Username + password |
 
 ---
 
@@ -70,6 +73,14 @@ brew install msodbcsql18
 curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
 sudo apt-get install msodbcsql18
 ```
+
+### MySQL driver (installed automatically via requirements.txt)
+
+```bash
+pip install mysql-connector-python
+```
+
+> If you see `ModuleNotFoundError: No module named 'mysql'`, run the above command manually.
 
 ---
 
@@ -117,9 +128,19 @@ The app opens at **http://localhost:8501**
 
 ---
 
-## Step 5 — Connect your database
+## Step 5 — Connect your database(s)
 
-Still in the **🔌 Connections** tab, expand your database type and fill in the details:
+Still in the **🔌 Connections** tab:
+
+1. Use the **"Select database type"** dropdown to pick your DB
+2. Give the connection a friendly **name** (e.g. `Sales DB`, `Analytics PG`)
+3. Fill in the credentials and click **Connect**
+4. Repeat to add more databases — all connections stay active simultaneously
+5. Switch between databases in the **Chat** tab dropdown or the sidebar
+
+---
+
+### Connection details by type
 
 ### ❄️ Snowflake
 | Field | Example |
@@ -159,13 +180,29 @@ For Username/Password: your AAD username and password
 | Username | `postgres` |
 | SSL mode | `disable` |
 
-Click **🔌 Connect** — the app loads your schema and you're ready to chat.
+### 🐬 MySQL / Aurora MySQL
+| Field | Example |
+|---|---|
+| Host | `localhost` or `mydb.xxxx.rds.amazonaws.com` |
+| Port | `3306` |
+| Database | `mydb` |
+| Username | `root` |
+| Password | your password |
+| Disable SSL | check for local dev, leave unchecked for RDS |
+| Display label | `Production MySQL` |
+
+Click **🔌 Connect** — the app loads your schema. You can add more connections without disconnecting existing ones.
 
 ---
 
-## Step 6 — Ask questions
+## Step 6 — Ask questions (with multiple databases)
 
-Switch to the **💬 Chat** tab and type any data question:
+Switch to the **💬 Chat** tab. If you have multiple connections:
+- Use the **"Query database"** dropdown at the top of the chat to select which database to query
+- Each database has its own independent chat history
+- Switch at any time — no reconnection needed
+
+Type any data question:
 
 ```
 How many open disputes are there?
@@ -257,6 +294,7 @@ aidataanalyst/
 ├── fabric_client.py      # Microsoft Fabric connector
 ├── snowflake_client.py   # Snowflake connector
 ├── postgres_client.py    # PostgreSQL connector (local + AWS RDS)
+├── mysql_client.py       # MySQL / Aurora MySQL connector
 ├── config.py             # Environment variable loader
 ├── main.py               # Optional CLI interface
 └── requirements.txt
@@ -295,6 +333,15 @@ Set a billing alert: **AWS Console → Billing → Budgets → Create budget**
 
 **Schema loads but model says table doesn't exist**  
 → Click **🔄 Schema** in the sidebar to refresh. If using pgvector, re-index with **⚡ Index schema now**.
+
+**`ModuleNotFoundError: No module named 'mysql'`**  
+→ Run `pip install mysql-connector-python`
+
+**MySQL connection refused**  
+→ Make sure the MySQL server is running and the user has remote access: `GRANT ALL ON mydb.* TO 'user'@'%';`
+
+**Switching databases in chat doesn't work**  
+→ Use the **"Query database"** dropdown at the top of the chat tab, or the connection selector in the sidebar.
 
 ---
 
