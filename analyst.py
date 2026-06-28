@@ -1,12 +1,12 @@
 """
-Core AI analyst: orchestrates Mistral (Bedrock) + Microsoft Fabric.
+Core AI analyst: orchestrates Mistral (Bedrock) + database + optional vector store.
 
 Flow for each user question:
-  1. Ensure schema is loaded from Fabric.
-  2. Ask Mistral to generate T-SQL.
-  3. Execute SQL on Fabric.
+  1. If vector store is available → embed question → retrieve relevant table schemas.
+     Otherwise fall back to full schema.
+  2. Ask Mistral to generate SQL.
+  3. Execute SQL on the database.
   4. Ask Mistral to summarise the results.
-  5. Return answer + raw data.
 """
 
 import re
@@ -20,49 +20,70 @@ from config import config
 
 
 class AnalystSession:
-    """Stateful analyst session: maintains conversation history and schema cache."""
+    """Stateful analyst session with optional pgvector-backed schema retrieval."""
 
-    def __init__(self, fabric: BaseDBClient, bedrock: BedrockMistralClient):
-        self._fabric = fabric
+    def __init__(
+        self,
+        db: BaseDBClient,
+        bedrock: BedrockMistralClient,
+        vector_store=None,   # SchemaVectorStore | None
+    ):
+        self._db      = db
+        self._fabric  = db   # backwards-compat alias used internally
         self._bedrock = bedrock
-        self._history: List[Dict] = []   # rolling chat history for Mistral
-        self._schema: str = ""
+        self._vs      = vector_store
+        self._history: List[Dict] = []
+        self._schema:  str = ""
 
-    # ── Setup ─────────────────────────────────────────────────────────────────
+    # ── Schema loading ────────────────────────────────────────────────────────
 
     def load_schema(self, force: bool = False) -> str:
         if not self._schema or force:
-            self._schema = self._fabric.get_schema(force_refresh=force)
+            self._schema = self._db.get_schema(force_refresh=force)
+        return self._schema
+
+    def set_vector_store(self, vs) -> None:
+        self._vs = vs
+
+    # ── Schema retrieval ──────────────────────────────────────────────────────
+
+    def _get_relevant_schema(self, question: str) -> str:
+        """
+        If a vector store is configured, retrieve only the relevant table schemas.
+        Falls back to the full schema if vector store is unavailable.
+        """
+        if self._vs:
+            db_label = getattr(self._db, "label", "db")
+            try:
+                retrieved = self._vs.search(db_label, question, top_k=8)
+                if retrieved:
+                    return retrieved
+            except Exception:
+                pass  # fall through to full schema
         return self._schema
 
     # ── Main entry point ──────────────────────────────────────────────────────
 
     def ask(self, question: str) -> dict:
-        """
-        Process a natural-language question and return:
-          {
-            "question": str,
-            "sql": str,
-            "data": None,  # type: Optional[pd.DataFrame]
-            "answer": str,
-            "error": None,  # type: Optional[str]
-          }
-        """
         self.load_schema()
 
-        result = {
+        result: Dict = {
             "question": question,
-            "sql": "",
-            "data": None,
-            "answer": "",
-            "error": None,
+            "sql":      "",
+            "data":     None,
+            "answer":   "",
+            "error":    None,
+            "schema_source": "vector" if self._vs else "full",
         }
 
-        # ── 1. Generate SQL ───────────────────────────────────────────────────
+        # ── 1. Retrieve schema (vector or full) ───────────────────────────────
+        schema = self._get_relevant_schema(question)
+
+        # ── 2. Generate SQL ───────────────────────────────────────────────────
         try:
-            dialect = getattr(self._fabric, "label", "SQL")
+            dialect = getattr(self._db, "label", "SQL")
             raw_sql = self._bedrock.generate_sql(
-                schema=self._schema,
+                schema=schema,
                 question=question,
                 dialect=dialect,
                 history=self._history[-6:],
@@ -70,54 +91,51 @@ class AnalystSession:
             sql = self._clean_sql(raw_sql)
             result["sql"] = sql
         except Exception as e:
-            result["error"] = f"SQL generation failed: {e}"
+            result["error"]  = f"SQL generation failed: {e}"
             result["answer"] = result["error"]
             return result
 
-        # ── 2. Execute on Fabric ──────────────────────────────────────────────
+        # ── 3. Execute ────────────────────────────────────────────────────────
         try:
-            df = self._fabric.query_df(sql)
+            df = self._db.query_df(sql)
             result["data"] = df
         except Exception as e:
             result["error"] = str(e)
-            # Ask Mistral to suggest a fix
             try:
                 suggestion = self._bedrock.clarify(question, str(e))
                 result["answer"] = (
                     f"Query execution failed.\n\nError: {e}\n\n"
-                    f"Mistral suggestion:\n{suggestion}"
+                    f"Suggestion:\n{suggestion}"
                 )
             except Exception:
                 result["answer"] = f"Query execution failed: {e}"
             return result
 
-        # ── 3. Summarise ──────────────────────────────────────────────────────
-        result_text = self._df_to_text(df)
+        # ── 4. Summarise ──────────────────────────────────────────────────────
+        result_text = self._df_to_text(result["data"])
         try:
-            answer = self._bedrock.summarize_results(question, sql, result_text)
-            result["answer"] = answer
+            result["answer"] = self._bedrock.summarize_results(
+                question, sql, result_text
+            )
         except Exception as e:
-            # Still show the data even if summarisation fails
             result["answer"] = f"(Summarisation failed: {e})\n\n{result_text}"
 
-        # ── 4. Update history ─────────────────────────────────────────────────
-        self._history.append({"role": "user", "content": question})
+        # ── 5. Update history ─────────────────────────────────────────────────
+        self._history.append({"role": "user",      "content": question})
         self._history.append({"role": "assistant", "content": result["answer"]})
-        # Keep history bounded
         if len(self._history) > 20:
             self._history = self._history[-20:]
 
         return result
 
     def general_chat(self, message: str) -> str:
-        """Handle non-data questions (general conversation with the analyst)."""
         system = (
-            "You are an AI data analyst assistant. You have access to a Microsoft Fabric "
-            "data warehouse. Answer the user's question helpfully. If it relates to data, "
-            "let them know they can ask data questions and you'll write SQL for them."
+            "You are an AI data analyst assistant. Answer helpfully. "
+            "If the question is about data, let the user know they can ask "
+            "data questions and you will write SQL for them."
         )
         response = self._bedrock.chat(system, message, self._history[-6:])
-        self._history.append({"role": "user", "content": message})
+        self._history.append({"role": "user",      "content": message})
         self._history.append({"role": "assistant", "content": response})
         return response
 
@@ -128,18 +146,18 @@ class AnalystSession:
 
     @staticmethod
     def _clean_sql(raw: str) -> str:
-        """Strip markdown fences and whitespace from Mistral's SQL output."""
-        # Remove ```sql ... ``` or ``` ... ```
         raw = re.sub(r"```(?:sql)?", "", raw, flags=re.IGNORECASE)
         raw = raw.replace("```", "").strip()
-        return raw
+        match = re.search(r"\b(SELECT|WITH)\b", raw, re.IGNORECASE)
+        if match:
+            raw = raw[match.start():]
+        return raw.strip()
 
     @staticmethod
     def _df_to_text(df: pd.DataFrame) -> str:
-        if df.empty:
+        if df is None or df.empty:
             return "(No rows returned)"
-        truncated = df.attrs.get("truncated", False)
         text = tabulate(df, headers="keys", tablefmt="psql", showindex=False)
-        if truncated:
-            text += f"\n[Showing first {config.MAX_ROWS_DISPLAY} rows — more rows exist]"
+        if df.attrs.get("truncated"):
+            text += f"\n[Showing first {config.MAX_ROWS_DISPLAY} rows]"
         return text
