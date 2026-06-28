@@ -474,11 +474,17 @@ with tab_conn:
     )
     db_type_key = DB_TYPES[chosen_label]
 
+    # Key includes db_type so the widget resets automatically when the type changes.
+    # After a successful connect we delete this key so the next render gets a fresh default.
+    _name_key = f"new_conn_name_{db_type_key}"
     conn_name_default = f"{chosen_label.split()[-1]} {len(connections)+1}"
+    # Only write the default into session state when the key is absent or stale
+    # (i.e. the stored name already exists as a connection — auto-increment it)
+    if _name_key not in st.session_state or st.session_state[_name_key] in connections:
+        st.session_state[_name_key] = conn_name_default
     conn_name = st.text_input(
         "Connection name",
-        value=conn_name_default,
-        key="new_conn_name",
+        key=_name_key,
         help="A friendly name to identify this connection (e.g. 'Sales DB', 'Analytics PG')",
     )
 
@@ -515,7 +521,9 @@ with tab_conn:
                             warehouse=sf_warehouse, database=sf_database,
                             schema=sf_schema, role=sf_role, max_rows=sf_maxrows),
                             "snowflake")
-                        st.success(f"Connected: {conn_name}"); st.rerun()
+                        st.success(f"Connected: {conn_name}")
+                        st.session_state.pop(_name_key, None)
+                        st.rerun()
                     except Exception as e:
                         st.error(f"{e}")
 
@@ -575,7 +583,9 @@ with tab_conn:
                 with st.spinner("Connecting…"):
                     try:
                         _add_connection(conn_name, FabricClient(), "fabric")
-                        st.success(f"Connected: {conn_name}"); st.rerun()
+                        st.success(f"Connected: {conn_name}")
+                        st.session_state.pop(_name_key, None)
+                        st.rerun()
                     except Exception as e:
                         st.error(f"{e}")
 
@@ -617,7 +627,9 @@ with tab_conn:
                             user=pgaws_user, password=pgaws_pass, sslmode=pgaws_ssl,
                             max_rows=pgaws_maxrows, label="AWS RDS PostgreSQL"),
                             "pgaws")
-                        st.success(f"Connected: {conn_name}"); st.rerun()
+                        st.success(f"Connected: {conn_name}")
+                        st.session_state.pop(_name_key, None)
+                        st.rerun()
                     except Exception as e:
                         st.error(f"{e}")
 
@@ -656,7 +668,9 @@ with tab_conn:
                             user=pgl_user, password=pgl_pass, sslmode=pgl_ssl,
                             max_rows=pgl_maxrows, label="Local PostgreSQL"),
                             "pglocal")
-                        st.success(f"Connected: {conn_name}"); st.rerun()
+                        st.success(f"Connected: {conn_name}")
+                        st.session_state.pop(_name_key, None)
+                        st.rerun()
                     except Exception as e:
                         st.error(f"{e}")
 
@@ -697,7 +711,9 @@ with tab_conn:
                             user=my_user, password=my_pass, ssl_disabled=my_ssl,
                             max_rows=my_maxrows, label=my_label),
                             "mysql")
-                        st.success(f"Connected: {conn_name}"); st.rerun()
+                        st.success(f"Connected: {conn_name}")
+                        st.session_state.pop(_name_key, None)
+                        st.rerun()
                     except Exception as e:
                         st.error(f"{e}")
 

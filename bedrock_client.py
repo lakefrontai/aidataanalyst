@@ -101,13 +101,15 @@ class BedrockMistralClient:
             f"You are an expert {dialect} SQL developer and data analyst.\n"
             "Your ONLY job is to output a single valid SQL SELECT query — nothing else.\n\n"
             "STRICT RULES — violating any rule makes the response wrong:\n"
-            "1. Output ONLY the raw SQL query. No explanations. No markdown. No code fences. No apologies.\n"
-            "2. The first character of your response MUST be S (from SELECT) or W (from WITH).\n"
-            "3. Never say 'I', 'I'm', 'Unable', 'cannot', or any English prose.\n"
+            "1. Output ONLY the raw SQL query. No explanations. No markdown. No code fences. No prose.\n"
+            "2. The very first character of your response MUST be S (SELECT) or W (WITH). Nothing before it.\n"
+            "3. Never write 'I', 'I'm', 'Unable', 'cannot', 'Suggestion', 'Note', 'Error', or any English text.\n"
             "4. If you are unsure, write your best guess at a SELECT query anyway.\n"
             "5. Never use DROP, DELETE, UPDATE, INSERT, CREATE, ALTER, or TRUNCATE.\n"
             "6. Always use the exact table and column names from the schema below.\n"
-            "7. Qualify every column with its table alias.\n\n"
+            "7. EVERY column in SELECT, WHERE, GROUP BY, ORDER BY, and JOIN conditions MUST be prefixed "
+            "with a table alias (e.g. t1.org_id, NOT org_id). Ambiguous column references are a fatal error.\n"
+            "8. Assign a short alias to every table (e.g. FROM disputes d, orgs o) and use those aliases everywhere.\n\n"
             f"DATABASE SCHEMA:\n{schema}"
         )
         raw = self.chat(system, question, history)
@@ -136,9 +138,17 @@ class BedrockMistralClient:
 
     @staticmethod
     def _clean_sql(raw: str) -> str:
-        """Strip markdown fences and any leading prose before the first SELECT/WITH."""
-        raw = re.sub(r"```(?:sql)?", "", raw, flags=re.IGNORECASE)
-        raw = raw.replace("```", "").strip()
+        """Strip markdown fences, prose, and suggestions — keep only the SQL."""
+        # Extract the last SQL code block if the model wrapped it in fences
+        fenced = re.findall(r"```(?:sql)?\s*([\s\S]*?)```", raw, re.IGNORECASE)
+        if fenced:
+            # Use the last code block (model sometimes gives explanation then corrected SQL)
+            raw = fenced[-1]
+        else:
+            raw = re.sub(r"```(?:sql)?", "", raw, flags=re.IGNORECASE)
+            raw = raw.replace("```", "")
+
+        raw = raw.strip()
         # Find the first SELECT or WITH keyword and trim anything before it
         match = re.search(r"\b(SELECT|WITH)\b", raw, re.IGNORECASE)
         if match:
