@@ -15,3 +15,7 @@ snowflake-connector-python>=3.10.0
 psycopg2-binary>=2.9.9
 pgvector>=0.3.0
 numpy>=1.24.0
+
+# Desktop app (optional — only needed when building the packaged app)
+# pywebview>=5.0.0
+# pyinstaller>=6.0.0
