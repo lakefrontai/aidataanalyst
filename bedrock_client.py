@@ -109,7 +109,11 @@ class BedrockMistralClient:
             "6. Always use the exact table and column names from the schema below.\n"
             "7. EVERY column in SELECT, WHERE, GROUP BY, ORDER BY, and JOIN conditions MUST be prefixed "
             "with a table alias (e.g. t1.org_id, NOT org_id). Ambiguous column references are a fatal error.\n"
-            "8. Assign a short alias to every table (e.g. FROM disputes d, orgs o) and use those aliases everywhere.\n\n"
+            "8. Assign a short alias to every table (e.g. FROM disputes d, orgs o) and use those aliases everywhere.\n"
+            "9. NEVER add WHERE clause filters for column values not explicitly mentioned in the question. "
+            "For example, if the user says 'disputes created last week', do NOT filter by status — "
+            "'created' describes when rows were inserted (the created_at timestamp), not a status value.\n"
+            "10. When grouping by date/day, use DATE(col) or DATE_TRUNC('day', col) — never group by a raw timestamp.\n\n"
             f"DATABASE SCHEMA:\n{schema}"
         )
         raw = self.chat(system, question, history)
