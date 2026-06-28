@@ -8,7 +8,6 @@ Ask questions about your data in plain English. The app writes the SQL, runs it,
 
 ---
 
-
 ## What it does
 
 ```
@@ -30,7 +29,6 @@ You can keep **multiple databases connected at once** and switch between them in
 | Database | Auth method |
 |---|---|
 | ❄️ Snowflake | Username + password + warehouse |
-| 🏭 Microsoft Fabric | Service principal or username/password |
 | 🐘 AWS RDS PostgreSQL | Password + SSL |
 | 💻 Local PostgreSQL | Password |
 | 🐬 MySQL / Aurora MySQL | Username + password |
@@ -60,19 +58,6 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-```
-
-### Extra driver for Microsoft Fabric
-
-```bash
-# macOS
-brew install unixodbc
-brew tap microsoft/mssql-release https://github.com/Microsoft/homebrew-mssql-release
-brew install msodbcsql18
-
-# Ubuntu/Debian
-curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-sudo apt-get install msodbcsql18
 ```
 
 ### MySQL driver (installed automatically via requirements.txt)
@@ -152,16 +137,6 @@ Still in the **🔌 Connections** tab:
 | Warehouse | `COMPUTE_WH` |
 | Database | `SALES_DB` |
 | Schema | `PUBLIC` |
-
-### 🏭 Microsoft Fabric
-| Field | Example |
-|---|---|
-| SQL Endpoint | `workspace.datawarehouse.fabric.microsoft.com` |
-| Database | `my_database` |
-| Auth | Service Principal or Username/Password |
-
-For Service Principal: Tenant ID + Client ID + Client Secret  
-For Username/Password: your AAD username and password
 
 ### 🐘 AWS RDS PostgreSQL
 | Field | Example |
@@ -292,7 +267,6 @@ aidataanalyst/
 ├── model_discovery.py    # Live model listing from Bedrock
 ├── vector_store.py       # pgvector schema embeddings and retrieval
 ├── db_base.py            # Abstract base class for all DB connectors
-├── fabric_client.py      # Microsoft Fabric connector
 ├── snowflake_client.py   # Snowflake connector
 ├── postgres_client.py    # PostgreSQL connector (local + AWS RDS)
 ├── mysql_client.py       # MySQL / Aurora MySQL connector
@@ -325,9 +299,6 @@ Set a billing alert: **AWS Console → Billing → Budgets → Create budget**
 
 **`ValidationException: This model doesn't support system messages`**  
 → The app handles this automatically with a fallback. If you still see it, try a different model.
-
-**`Library not loaded: libodbc.2.dylib`** (Fabric / pyodbc)  
-→ Run `brew install unixodbc && pip install --force-reinstall pyodbc`
 
 **`extension "vector" is not available`** (pgvector)  
 → Follow the install steps in Step 7 above or expand the install guide in the Vector Store tab.
