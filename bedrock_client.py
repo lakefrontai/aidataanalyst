@@ -55,7 +55,36 @@ class BedrockMistralClient:
         except ClientError as e:
             code = e.response["Error"]["Code"]
             msg  = e.response["Error"]["Message"]
+            # Some models (e.g. Mistral 7B) don't support system messages —
+            # retry by prepending the system prompt into the first user turn.
+            if code == "ValidationException" and "system" in msg.lower():
+                return self._invoke_no_system(system, converse_msgs, max_tokens, temperature)
             raise RuntimeError(f"Bedrock error [{code}]: {msg}") from e
+
+    def _invoke_no_system(
+        self,
+        system: str,
+        messages: List[Dict],
+        max_tokens: int,
+        temperature: float,
+    ) -> str:
+        """Fallback for models that don't support system messages.
+        Prepends the system prompt to the first user message."""
+        patched = list(messages)
+        for i, m in enumerate(patched):
+            if m["role"] == "user":
+                first_text = m["content"][0]["text"]
+                patched[i] = {
+                    "role": "user",
+                    "content": [{"text": f"{system}\n\n{first_text}"}],
+                }
+                break
+        resp = self._client.converse(
+            modelId=self.model_id,
+            messages=patched,
+            inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+        )
+        return resp["output"]["message"]["content"][0]["text"].strip()
 
     # ── Public helpers ────────────────────────────────────────────────────────
 
