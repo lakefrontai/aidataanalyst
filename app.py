@@ -4,7 +4,9 @@ AWS Bedrock (any model) + multi-source DB + pgvector schema store
 Supports multiple simultaneous database connections.
 """
 
-import traceback
+import json
+import time
+from datetime import datetime
 from typing import Optional, List, Dict
 import pandas as pd
 import plotly.express as px
@@ -28,80 +30,121 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-[data-testid="stAppViewContainer"] { background:#f5f7fa; }
-[data-testid="stSidebar"] { background:#ffffff; border-right:1px solid #e0e4ec; }
+# ── Theme palettes ────────────────────────────────────────────────────────────
+PALETTES = {
+    "light": {
+        "bg": "#f5f7fa", "card": "#ffffff", "border": "#e0e4ec",
+        "text": "#1a1a2e", "subtext": "#5f6b7a",
+        "accent": "#1a73e8", "accent2": "#7c4dff",
+        "user_bg": "#e8f0fe", "user_border": "#c5d3f0",
+        "active_bg": "#f0f7ff", "banner_grad": "linear-gradient(135deg,#e8f0fe 0%,#f0f4ff 100%)",
+        "code_bg": "#ffffff", "shadow": "rgba(0,0,0,0.06)",
+    },
+    "dark": {
+        "bg": "#0f1419", "card": "#1a2129", "border": "#2c3540",
+        "text": "#e6edf3", "subtext": "#9aa7b4",
+        "accent": "#4d9fff", "accent2": "#a78bfa",
+        "user_bg": "#1e2d40", "user_border": "#2f4664",
+        "active_bg": "#13233a", "banner_grad": "linear-gradient(135deg,#16243a 0%,#1a1f3a 100%)",
+        "code_bg": "#10161d", "shadow": "rgba(0,0,0,0.4)",
+    },
+}
 
-.banner {
-    background:linear-gradient(135deg,#e8f0fe 0%,#f0f4ff 100%);
-    border:1px solid #c5d3f0; border-radius:12px;
+
+def _inject_theme(theme: str) -> None:
+    """Inject palette-driven CSS for the chosen theme ('light' or 'dark')."""
+    p = PALETTES.get(theme, PALETTES["light"])
+    st.markdown(f"""
+<style>
+[data-testid="stAppViewContainer"] {{ background:{p['bg']}; }}
+[data-testid="stSidebar"] {{ background:{p['card']}; border-right:1px solid {p['border']}; }}
+[data-testid="stSidebar"] * {{ color:{p['text']}; }}
+[data-testid="stAppViewContainer"] .stMarkdown,
+[data-testid="stAppViewContainer"] p,
+[data-testid="stAppViewContainer"] label,
+[data-testid="stAppViewContainer"] h1,
+[data-testid="stAppViewContainer"] h2,
+[data-testid="stAppViewContainer"] h3 {{ color:{p['text']}; }}
+
+.banner {{
+    background:{p['banner_grad']};
+    border:1px solid {p['border']}; border-radius:12px;
     padding:18px 24px; margin-bottom:20px;
     display:flex; align-items:center; gap:16px;
-}
-.banner-title {
+}}
+.banner-title {{
     font-size:1.6rem; font-weight:700; margin:0;
-    background:linear-gradient(90deg,#1a73e8,#7c4dff);
+    background:linear-gradient(90deg,{p['accent']},{p['accent2']});
     -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-}
-.banner-sub { color:#5f6b7a; font-size:0.85rem; margin:4px 0 0 0; }
+}}
+.banner-sub {{ color:{p['subtext']}; font-size:0.85rem; margin:4px 0 0 0; }}
 
-.conn-card {
-    background:#ffffff; border:2px solid #e0e4ec;
+.conn-card {{
+    background:{p['card']}; border:2px solid {p['border']};
     border-radius:14px; padding:16px 20px; margin-bottom:10px;
     display:flex; align-items:center; justify-content:space-between;
-}
-.conn-card.active { border-color:#1a73e8; background:#f0f7ff; }
-.conn-card-left { display:flex; align-items:center; gap:12px; }
-.conn-icon  { font-size:1.6rem; }
-.conn-name  { font-size:1rem; font-weight:700; color:#1a1a2e; }
-.conn-desc  { font-size:0.78rem; color:#5f6b7a; margin:0; }
-.conn-badge { display:inline-block; padding:2px 10px; border-radius:20px;
-              font-size:0.7rem; font-weight:700; margin-top:4px; }
-.badge-connected    { background:#e6f4ea; color:#1e7e34; border:1px solid #a8d5b5; }
-.badge-disconnected { background:#f5f5f5; color:#757575; border:1px solid #e0e0e0; }
-.badge-vector       { background:#ede7f6; color:#5e35b1; border:1px solid #c5b3e6; }
+}}
+.conn-card.active {{ border-color:{p['accent']}; background:{p['active_bg']}; }}
+.conn-icon  {{ font-size:1.6rem; }}
+.conn-name  {{ font-size:1rem; font-weight:700; color:{p['text']}; }}
+.conn-desc  {{ font-size:0.78rem; color:{p['subtext']}; margin:0; }}
+.conn-badge {{ display:inline-block; padding:2px 10px; border-radius:20px;
+              font-size:0.7rem; font-weight:700; margin-top:4px; }}
+.badge-vector {{ background:#ede7f6; color:#5e35b1; border:1px solid #c5b3e6; }}
 
-.chat-user {
-    background:#e8f0fe; border:1px solid #c5d3f0;
-    border-radius:16px 16px 4px 16px; padding:12px 16px;
-    margin:8px 0 8px 60px; color:#1a1a2e; font-size:0.95rem;
-}
-.chat-assistant {
-    background:#ffffff; border:1px solid #e0e4ec;
-    border-radius:16px 16px 16px 4px; padding:12px 16px;
-    margin:8px 60px 8px 0; color:#1a1a2e; font-size:0.95rem;
-    box-shadow:0 1px 4px rgba(0,0,0,0.06);
-}
-.chat-label-user { font-size:0.72rem; color:#1a73e8; font-weight:600;
-                   text-align:right; margin-bottom:2px; }
-.chat-label-ai   { font-size:0.72rem; color:#7c4dff; font-weight:600; margin-bottom:2px; }
+.status-dot {{ display:inline-block; width:9px; height:9px; border-radius:50%;
+               margin-right:6px; vertical-align:middle; }}
+.dot-live {{ background:#2ecc71; box-shadow:0 0 6px #2ecc71; }}
+.dot-slow {{ background:#f39c12; }}
+.dot-down {{ background:#e74c3c; }}
 
-.sidebar-section { font-size:0.7rem; font-weight:700; color:#1a73e8;
-                   text-transform:uppercase; letter-spacing:1px; margin:18px 0 6px 0; }
+.sidebar-section {{ font-size:0.7rem; font-weight:700; color:{p['accent']};
+                   text-transform:uppercase; letter-spacing:1px; margin:18px 0 6px 0; }}
 
-.metric-card { background:#ffffff; border:1px solid #e0e4ec;
+.metric-card {{ background:{p['card']}; border:1px solid {p['border']};
                border-radius:10px; padding:16px; text-align:center;
-               box-shadow:0 1px 4px rgba(0,0,0,0.05); }
-.metric-value { font-size:1.8rem; font-weight:700; color:#1a73e8; }
-.metric-label { font-size:0.78rem; color:#5f6b7a; margin-top:4px; }
+               box-shadow:0 1px 4px {p['shadow']}; }}
 
-.vs-info { background:#f3f0ff; border:1px solid #c5b3e6; border-radius:8px;
-           padding:10px 14px; font-size:0.82rem; color:#3d1f8a; margin:8px 0; }
+.vs-info {{ background:{p['active_bg']}; border:1px solid {p['border']}; border-radius:8px;
+           padding:10px 14px; font-size:0.82rem; color:{p['text']}; margin:8px 0; }}
 
-.active-conn-row { background:#f0f7ff; border:1px solid #c5d3f0; border-radius:10px;
-                   padding:10px 14px; margin-bottom:8px;
-                   display:flex; align-items:center; justify-content:space-between; }
-
-.stButton>button {
-    background:linear-gradient(135deg,#1a73e8,#7c4dff) !important;
+.stButton>button {{
+    background:linear-gradient(135deg,{p['accent']},{p['accent2']}) !important;
     color:white !important; border:none !important;
     border-radius:8px !important; font-weight:600 !important;
-}
-#MainMenu, footer, header { visibility:hidden; }
+}}
+.stDownloadButton>button {{
+    background:linear-gradient(135deg,{p['accent']},{p['accent2']}) !important;
+    color:white !important; border:none !important; border-radius:8px !important;
+}}
+#MainMenu, footer, header {{ visibility:hidden; }}
 </style>
 """, unsafe_allow_html=True)
+
+
+# Rough on-demand prices ($ per 1M tokens) keyed by model-id substring.
+_PRICES = {
+    "mistral-large":  (2.00, 6.00),
+    "mistral-small":  (0.90, 2.70),
+    "mistral-7b":     (0.15, 0.20),
+    "nova-pro":       (0.80, 3.20),
+    "nova-lite":      (0.06, 0.24),
+    "nova-micro":     (0.035, 0.14),
+    "claude-3-5-haiku": (0.80, 4.00),
+    "claude-3-5-sonnet": (3.00, 15.00),
+    "claude-3-haiku": (0.25, 1.25),
+}
+
+
+def _estimate_cost(model_id: str, in_tokens: int, out_tokens: int) -> float:
+    """Estimate USD cost for a model given input/output token counts."""
+    mid = (model_id or "").lower()
+    in_price, out_price = 0.50, 1.50  # generic fallback
+    for key, (ip, op) in _PRICES.items():
+        if key in mid:
+            in_price, out_price = ip, op
+            break
+    return (in_tokens / 1_000_000) * in_price + (out_tokens / 1_000_000) * out_price
 
 
 # ── Chart helper ──────────────────────────────────────────────────────────────
@@ -131,12 +174,123 @@ def _auto_chart(df: pd.DataFrame):
         else:
             st.info("Could not determine a suitable chart type.")
             return
-        fig.update_layout(plot_bgcolor="#ffffff", paper_bgcolor="#f5f7fa",
-                          font_color="#1a1a2e",
-                          margin={"l": 20, "r": 20, "t": 40, "b": 20})
+        _style_fig(fig)
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.info(f"Auto-chart unavailable: {e}")
+
+
+def _style_fig(fig) -> None:
+    """Apply theme-aware background/font colours to a Plotly figure."""
+    p = PALETTES.get(st.session_state.get("theme", "light"), PALETTES["light"])
+    fig.update_layout(
+        plot_bgcolor=p["card"], paper_bgcolor=p["bg"], font_color=p["text"],
+        margin={"l": 20, "r": 20, "t": 40, "b": 20},
+    )
+
+
+def _chart_with_controls(df: pd.DataFrame, key: str) -> None:
+    """Render a chart with user-selectable chart type and X/Y axes."""
+    if df is None or df.empty or len(df.columns) < 2:
+        st.info("Not enough columns to chart.")
+        return
+    num_cols = df.select_dtypes(include="number").columns.tolist()
+    all_cols = df.columns.tolist()
+    if not num_cols:
+        st.info("No numeric column available to plot.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    ctype = c1.selectbox("Chart type", ["Auto", "Line", "Bar", "Area", "Scatter", "Pie"],
+                         key=f"ct_{key}")
+    if ctype == "Auto":
+        _auto_chart(df)
+        return
+    x_axis = c2.selectbox("X axis", all_cols, key=f"cx_{key}")
+    y_axis = c3.selectbox("Y axis", num_cols, key=f"cy_{key}")
+    try:
+        if ctype == "Line":
+            fig = px.line(df, x=x_axis, y=y_axis, template="plotly_white")
+        elif ctype == "Bar":
+            fig = px.bar(df.head(30), x=x_axis, y=y_axis, template="plotly_white",
+                         color=y_axis, color_continuous_scale="Blues")
+        elif ctype == "Area":
+            fig = px.area(df, x=x_axis, y=y_axis, template="plotly_white")
+        elif ctype == "Scatter":
+            fig = px.scatter(df, x=x_axis, y=y_axis, template="plotly_white")
+        else:  # Pie
+            fig = px.pie(df.head(12), names=x_axis, values=y_axis, template="plotly_white")
+        _style_fig(fig)
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        st.info(f"Chart unavailable: {e}")
+
+
+def _accumulate_usage(conn_data: Dict) -> None:
+    """Add the most-recent Bedrock token usage into the connection totals."""
+    usage = conn_data["bedrock"].last_usage or {}
+    conn_data["total_in_tokens"] = conn_data.get("total_in_tokens", 0) + \
+        usage.get("inputTokens", 0)
+    conn_data["total_out_tokens"] = conn_data.get("total_out_tokens", 0) + \
+        usage.get("outputTokens", 0)
+
+
+def _rerun_sql(conn_data: Dict, msg: Dict, new_sql: str) -> None:
+    """Execute user-edited SQL, refresh the result table and summary in place."""
+    session = conn_data["session"]
+    bedrock = conn_data["bedrock"]
+    try:
+        df = session.execute_sql(new_sql)
+        question = msg.get("question", "Re-run query")
+        text = session.result_to_text(df)
+        answer = bedrock.summarize_results(question, new_sql, text)
+        _accumulate_usage(conn_data)
+        msg.update({"sql": new_sql, "df": df, "error": None, "content": answer})
+        conn_data["total_queries"] = conn_data.get("total_queries", 0) + 1
+        conn_data["total_rows"] = conn_data.get("total_rows", 0) + len(df)
+        conn_data["status"] = "live"
+        st.toast("Re-ran edited SQL", icon="▶️")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        msg["error"] = f"Re-run failed: {e}"
+        conn_data["status"] = "down"
+    st.rerun()
+
+
+def _render_assistant(conn_data: Dict, msg: Dict, idx: int) -> None:
+    """Render one assistant turn: vector badge, SQL (editable), table, chart, summary."""
+    if msg.get("schema_source") == "vector":
+        st.caption("🧠 vector retrieval")
+    if msg.get("error"):
+        st.error(msg["error"], icon="🚫")
+
+    sql = msg.get("sql")
+    if sql:
+        with st.expander("🔍 Generated SQL", expanded=False):
+            st.code(sql, language="sql")  # has a built-in copy button
+            if st.checkbox("✏️ Edit & re-run", key=f"edit_{idx}"):
+                new_sql = st.text_area("Edit SQL", value=sql, height=140,
+                                       key=f"sqlarea_{idx}", label_visibility="collapsed")
+                if st.button("▶️ Re-run query", key=f"rerun_{idx}", type="primary"):
+                    _rerun_sql(conn_data, msg, new_sql)
+
+    df_msg = msg.get("df")
+    if df_msg is not None and not df_msg.empty:
+        t_tbl, t_chart = st.tabs(["📋 Table", "📊 Chart"])
+        with t_tbl:
+            st.dataframe(df_msg, use_container_width=True, height=260)
+            st.caption(f"{len(df_msg)} row(s)" +
+                       (" · truncated" if df_msg.attrs.get("truncated") else ""))
+            st.download_button(
+                "⬇️ Download CSV",
+                data=df_msg.to_csv(index=False).encode("utf-8"),
+                file_name="query_results.csv", mime="text/csv",
+                key=f"dl_{idx}",
+            )
+        with t_chart:
+            _chart_with_controls(df_msg, key=str(idx))
+
+    if msg.get("content"):
+        st.markdown(msg["content"])
 
 
 # ── Bedrock helpers ───────────────────────────────────────────────────────────
@@ -155,6 +309,7 @@ def _make_bedrock(model_id: str = "") -> BedrockMistralClient:
         aws_secret_access_key=secret,
     )
     b.model_id = model
+    b.last_usage = {"inputTokens": 0, "outputTokens": 0}
     return b
 
 
@@ -188,8 +343,36 @@ def _add_connection(name: str, db_client, db_type: str) -> None:
         "messages": [],
         "total_queries": 0,
         "total_rows":    0,
+        "total_in_tokens":  0,
+        "total_out_tokens": 0,
+        "status":       "live",
+        "last_used":    None,
+        "last_latency_ms": None,
     }
+    # Rehydrate chat history imported from a saved workspace, if any
+    pending = st.session_state.get("_pending_chats", {})
+    if name in pending:
+        st.session_state.connections[name]["messages"] = pending[name].get("messages", [])
     st.session_state.active_conn = name
+
+
+def _check_health(name: str) -> None:
+    """Run a trivial query to gauge connection health and latency."""
+    conn = st.session_state.connections.get(name)
+    if not conn:
+        return
+    probe = {"snowflake": "SELECT 1", "fabric": "SELECT 1",
+             "pgaws": "SELECT 1", "pglocal": "SELECT 1", "mysql": "SELECT 1"}
+    sql = probe.get(conn["type"], "SELECT 1")
+    start = time.time()
+    try:
+        conn["client"].query_df(sql)
+        elapsed = int((time.time() - start) * 1000)
+        conn["last_latency_ms"] = elapsed
+        conn["status"] = "slow" if elapsed > 1500 else "live"
+    except Exception:  # pylint: disable=broad-exception-caught
+        conn["status"] = "down"
+        conn["last_latency_ms"] = None
 
 
 def _remove_connection(name: str) -> None:
@@ -211,6 +394,67 @@ def _active_conn() -> Optional[Dict]:
     return st.session_state.connections.get(name) if name else None
 
 
+# ── Workspace persistence ─────────────────────────────────────────────────────
+_SAVED_KEYS = ["sf_saved", "fab_saved", "pgaws_saved",
+               "pgloc_saved", "mysql_saved", "vs_saved"]
+_SECRET_FIELDS = {"password", "password_up", "client_secret", "secret"}
+
+
+def _export_workspace() -> str:
+    """Serialise theme, model choice, form values (secrets stripped) and chat
+    history to a JSON string. DataFrames are dropped (not serialisable)."""
+    forms = {}
+    for key in _SAVED_KEYS:
+        cfg = dict(st.session_state.get(key, {}) or {})
+        for secret in _SECRET_FIELDS:
+            if secret in cfg:
+                cfg[secret] = ""
+        forms[key] = cfg
+
+    chats = {}
+    for cname, cdata in st.session_state.connections.items():
+        chats[cname] = {
+            "type": cdata.get("type"),
+            "messages": [
+                {k: v for k, v in m.items() if k != "df"}
+                for m in cdata.get("messages", [])
+            ],
+        }
+
+    payload = {
+        "version": 1,
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "theme": st.session_state.theme,
+        "bk_region": st.session_state.bk_region,
+        "bk_model": st.session_state.bk_model,
+        "forms": forms,
+        "chats": chats,
+    }
+    return json.dumps(payload, indent=2, default=str)
+
+
+def _import_workspace(raw: bytes) -> str:
+    """Restore form values, theme, model and chat history from exported JSON.
+    Returns a human-readable status message."""
+    data = json.loads(raw)
+    st.session_state.theme = data.get("theme", "light")
+    st.session_state.bk_region = data.get("bk_region", st.session_state.bk_region)
+    st.session_state.bk_model = data.get("bk_model", st.session_state.bk_model)
+    for key, cfg in data.get("forms", {}).items():
+        if key in _SAVED_KEYS:
+            st.session_state[key] = cfg
+    # Re-attach chat history to any matching live connection by name
+    restored = 0
+    for cname, cdata in data.get("chats", {}).items():
+        live = st.session_state.connections.get(cname)
+        if live is not None:
+            live["messages"] = cdata.get("messages", [])
+            restored += 1
+    st.session_state["_pending_chats"] = data.get("chats", {})
+    return (f"Workspace imported. Restored history for {restored} live "
+            "connection(s); reconnect others by the same name to rehydrate.")
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 _DEFAULTS: Dict = {
     # Multi-connection registry
@@ -227,21 +471,35 @@ _DEFAULTS: Dict = {
     "vs_connected": False,
     "vs_saved": {},
     "vs_indexed_count": 0,
+    # UI
+    "theme": "light",
+    "pending_q": None,
 }
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
+# Apply the active theme on every render
+_inject_theme(st.session_state.theme)
+
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
-    <div style='text-align:center;padding:10px 0 18px 0;'>
+    <div style='text-align:center;padding:10px 0 12px 0;'>
         <div style='font-size:2rem;'>📊</div>
-        <div style='font-weight:700;color:#1a1a2e;font-size:1.05rem;'>AI Data Analyst</div>
-        <div style='color:#5f6b7a;font-size:0.75rem;'>Bedrock · Any Model · Multi-DB</div>
+        <div style='font-weight:700;font-size:1.05rem;'>AI Data Analyst</div>
+        <div style='opacity:0.7;font-size:0.75rem;'>Bedrock · Any Model · Multi-DB</div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Theme toggle
+    _dark = st.toggle("🌙 Dark mode", value=st.session_state.theme == "dark",
+                      key="theme_toggle")
+    _new_theme = "dark" if _dark else "light"
+    if _new_theme != st.session_state.theme:
+        st.session_state.theme = _new_theme
+        st.rerun()
 
     connections = st.session_state.connections
     active_name = st.session_state.active_conn
@@ -291,11 +549,9 @@ with st.sidebar:
                         st.session_state["preview_table"] = selected
                 with c2:
                     if st.button("💬 Ask", use_container_width=True, key="btn_ask"):
-                        conn_data["messages"].append({
-                            "role": "user",
-                            "content": f"Describe the {selected} table and show me a summary",
-                            "_prefill": True,
-                        })
+                        st.session_state.pending_q = (
+                            f"Describe the {selected} table and show me a summary")
+                        st.rerun()
             st.caption(f"{len(table_list)} tables")
 
             st.markdown('<div class="sidebar-section">⚡ Quick Queries</div>',
@@ -308,13 +564,20 @@ with st.sidebar:
             ]:
                 if st.button(q[:44]+("…" if len(q)>44 else ""),
                              use_container_width=True, key=f"qq_{hash(q)}"):
-                    st.session_state["prefill"] = q
+                    st.session_state.pending_q = q
+                    st.rerun()
 
             st.markdown('<div class="sidebar-section">📈 Session Stats</div>',
                         unsafe_allow_html=True)
             m1, m2 = st.columns(2)
             m1.metric("Queries", conn_data.get("total_queries", 0))
             m2.metric("Rows",    conn_data.get("total_rows", 0))
+            tot_in  = conn_data.get("total_in_tokens", 0)
+            tot_out = conn_data.get("total_out_tokens", 0)
+            est = _estimate_cost(st.session_state.bk_model, tot_in, tot_out)
+            m3, m4 = st.columns(2)
+            m3.metric("Tokens", f"{tot_in + tot_out:,}")
+            m4.metric("Est. cost", f"${est:.4f}")
 
             st.divider()
             ca, cb = st.columns(2)
@@ -329,9 +592,33 @@ with st.sidebar:
                     with st.spinner("Reloading…"):
                         conn_data["schema"] = conn_data["session"].load_schema(force=True)
                         conn_data["tables"] = conn_data["client"].list_tables()
-                    st.success("Refreshed!")
+                    st.toast("Schema refreshed", icon="🔄")
     else:
         st.info("No database connected.\nGo to **Connections** to add one.")
+
+    # ── Workspace persistence ──────────────────────────────────────────────────
+    st.markdown('<div class="sidebar-section">💾 Workspace</div>',
+                unsafe_allow_html=True)
+    st.download_button(
+        "⬇️ Export workspace",
+        data=_export_workspace(),
+        file_name="ai_analyst_workspace.json",
+        mime="application/json",
+        use_container_width=True,
+        help="Saves theme, model, form values (passwords stripped) and chat history.",
+    )
+    _up = st.file_uploader("Import workspace", type=["json"],
+                           label_visibility="collapsed", key="ws_upload")
+    if _up is not None and not st.session_state.get("_ws_imported"):
+        try:
+            msg = _import_workspace(_up.getvalue())
+            st.session_state["_ws_imported"] = True
+            st.toast("Workspace imported", icon="💾")
+            st.success(msg)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            st.error(f"Import failed: {exc}")
+    if _up is None:
+        st.session_state["_ws_imported"] = False
 
 
 # ── Banner ────────────────────────────────────────────────────────────────────
@@ -435,13 +722,27 @@ with tab_conn:
                 "pgaws": "🐘", "pglocal": "💻", "mysql": "🐬",
             }
             icon = icon_map.get(cdata["type"], "🗄️")
-            col_info, col_switch, col_disc = st.columns([4, 2, 1])
+            status = cdata.get("status", "live")
+            dot_cls = {"live": "dot-live", "slow": "dot-slow", "down": "dot-down"}.get(
+                status, "dot-live")
+            lat = cdata.get("last_latency_ms")
+            lat_txt = f" · {lat} ms" if lat is not None else ""
+            col_info, col_health, col_switch, col_disc = st.columns([4, 1, 2, 1])
             with col_info:
                 badge = ("🟢 **Active**" if is_active else "⚪ Standby")
                 st.markdown(
+                    f'<span class="status-dot {dot_cls}"></span>'
                     f"{icon} **{cname}** · `{cdata['label']}` · "
                     f"{len(cdata.get('tables', []))} tables · {badge}"
+                    f"<span style='opacity:0.6;font-size:0.8rem;'>{lat_txt}</span>",
+                    unsafe_allow_html=True,
                 )
+            with col_health:
+                if st.button("🩺", key=f"health_{cname}", use_container_width=True,
+                             help="Test connection latency"):
+                    with st.spinner("Pinging…"):
+                        _check_health(cname)
+                    st.rerun()
             with col_switch:
                 if not is_active:
                     if st.button("Set active", key=f"activate_{cname}",
@@ -452,6 +753,7 @@ with tab_conn:
                 if st.button("✕", key=f"disc_{cname}", use_container_width=True,
                              help=f"Disconnect {cname}"):
                     _remove_connection(cname)
+                    st.toast(f"Disconnected {cname}", icon="🔌")
                     st.rerun()
 
     st.divider()
@@ -522,7 +824,7 @@ with tab_conn:
                             warehouse=sf_warehouse, database=sf_database,
                             schema=sf_schema, role=sf_role, max_rows=sf_maxrows),
                             "snowflake")
-                        st.success(f"Connected: {conn_name}")
+                        st.toast(f"Connected: {conn_name}", icon="✅")
                         st.session_state.pop(_name_key, None)
                         st.rerun()
                     except Exception as e:
@@ -585,7 +887,7 @@ with tab_conn:
                 with st.spinner("Connecting…"):
                     try:
                         _add_connection(conn_name, FabricClient(), "fabric")
-                        st.success(f"Connected: {conn_name}")
+                        st.toast(f"Connected: {conn_name}", icon="✅")
                         st.session_state.pop(_name_key, None)
                         st.rerun()
                     except Exception as e:
@@ -630,7 +932,7 @@ with tab_conn:
                             user=pgaws_user, password=pgaws_pass, sslmode=pgaws_ssl,
                             max_rows=pgaws_maxrows, label="AWS RDS PostgreSQL"),
                             "pgaws")
-                        st.success(f"Connected: {conn_name}")
+                        st.toast(f"Connected: {conn_name}", icon="✅")
                         st.session_state.pop(_name_key, None)
                         st.rerun()
                     except Exception as e:
@@ -672,7 +974,7 @@ with tab_conn:
                             user=pgl_user, password=pgl_pass, sslmode=pgl_ssl,
                             max_rows=pgl_maxrows, label="Local PostgreSQL"),
                             "pglocal")
-                        st.success(f"Connected: {conn_name}")
+                        st.toast(f"Connected: {conn_name}", icon="✅")
                         st.session_state.pop(_name_key, None)
                         st.rerun()
                     except Exception as e:
@@ -716,7 +1018,7 @@ with tab_conn:
                             user=my_user, password=my_pass, ssl_disabled=my_ssl,
                             max_rows=my_maxrows, label=my_label),
                             "mysql")
-                        st.success(f"Connected: {conn_name}")
+                        st.toast(f"Connected: {conn_name}", icon="✅")
                         st.session_state.pop(_name_key, None)
                         st.rerun()
                     except Exception as e:
@@ -960,9 +1262,9 @@ with tab_chat:
 
     if not conn_data:
         st.markdown("""
-        <div style="text-align:center;padding:60px 20px;color:#5f6b7a;">
+        <div style="text-align:center;padding:60px 20px;opacity:0.75;">
             <div style="font-size:4rem;margin-bottom:16px;">🔌</div>
-            <h2 style="color:#1a1a2e;font-weight:600;">No active connection</h2>
+            <h2 style="font-weight:600;">No active connection</h2>
             <p>Go to <strong>Connections</strong> to connect a database, then come back to chat.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -973,7 +1275,7 @@ with tab_chat:
         ]):
             col.markdown(f"""<div class="metric-card">
                 <div style="font-size:1.8rem;">{icon}</div>
-                <div style="color:#1a1a2e;font-weight:600;margin:6px 0;font-size:0.9rem;">{name}</div>
+                <div style="font-weight:600;margin:6px 0;font-size:0.9rem;">{name}</div>
             </div>""", unsafe_allow_html=True)
     else:
         # Connection switcher at top of chat (when multiple connections exist)
@@ -1036,87 +1338,88 @@ with tab_chat:
 
         # Chat history for this connection
         messages = conn_data.setdefault("messages", [])
+
+        # Empty state — clickable suggestion chips
         if not messages:
-            st.markdown("""
-            <div style="text-align:center;padding:40px;color:#5f6b7a;">
-                <div style="font-size:3rem;">💬</div>
-                <p style="margin:8px 0;color:#1a1a2e;font-weight:600;">Ask your first data question</p>
-                <p style="font-size:0.85rem;">
-                    Try: <em>"What are the top 10 customers by sales?"</em><br>
-                    or: <em>"How many open disputes are there?"</em>
-                </p>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(
+                '<div style="text-align:center;padding:30px 10px 10px;opacity:0.8;">'
+                '<div style="font-size:3rem;">💬</div>'
+                '<p style="font-weight:600;">Ask your first data question</p>'
+                '<p style="font-size:0.85rem;">Pick a starter or type your own below.</p>'
+                '</div>', unsafe_allow_html=True)
+            starters = [
+                "How many rows are in each table?",
+                "Show me the 10 most recent records",
+                "What are the top values by count?",
+                "Show trends over the last 30 days",
+            ]
+            chip_cols = st.columns(2)
+            for ci, starter in enumerate(starters):
+                if chip_cols[ci % 2].button(starter, key=f"chip_{ci}",
+                                            use_container_width=True):
+                    st.session_state.pending_q = starter
+                    st.rerun()
 
-        for msg in messages:
+        # Render history with native chat bubbles
+        for idx, msg in enumerate(messages):
             if msg["role"] == "user":
-                st.markdown(
-                    f'<div class="chat-label-user">You</div>'
-                    f'<div class="chat-user">{msg["content"]}</div>',
-                    unsafe_allow_html=True)
+                with st.chat_message("user", avatar="🧑"):
+                    st.markdown(msg["content"])
             else:
-                st.markdown('<div class="chat-label-ai">🤖 AI Analyst</div>',
-                            unsafe_allow_html=True)
-                src = msg.get("schema_source", "full")
-                if src == "vector":
-                    st.markdown(
-                        '<span style="font-size:0.7rem;background:#ede7f6;color:#5e35b1;'
-                        'border-radius:10px;padding:2px 8px;">🧠 vector retrieval</span>',
-                        unsafe_allow_html=True)
-                if msg.get("error"):
-                    st.error(msg["error"], icon="🚫")
-                if msg.get("sql"):
-                    with st.expander("🔍 Generated SQL", expanded=False):
-                        st.code(msg["sql"], language="sql")
-                df_msg = msg.get("df")
-                if df_msg is not None and not df_msg.empty:
-                    t1, t2 = st.tabs(["📋 Table", "📊 Chart"])
-                    with t1:
-                        st.dataframe(df_msg, use_container_width=True, height=260)
-                        st.caption(f"{len(df_msg)} row(s)" +
-                                   (" · truncated" if df_msg.attrs.get("truncated") else ""))
-                    with t2:
-                        _auto_chart(df_msg)
-                if msg.get("content"):
-                    st.markdown(
-                        f'<div class="chat-assistant">{msg["content"]}</div>',
-                        unsafe_allow_html=True)
-                st.markdown("<hr style='border-color:#e0e4ec;margin:14px 0;'>",
-                            unsafe_allow_html=True)
+                with st.chat_message("assistant", avatar="🤖"):
+                    _render_assistant(conn_data, msg, idx)
 
-        # Input
-        prefill = st.session_state.pop("prefill", "")
-        with st.form("chat_form", clear_on_submit=True):
-            cols = st.columns([8,1])
-            with cols[0]:
-                user_input = st.text_input(
-                    "question", value=prefill,
-                    placeholder="e.g. How many open disputes are there?",
-                    label_visibility="collapsed")
-            with cols[1]:
-                submitted = st.form_submit_button("Send ➤", use_container_width=True)
+        # Input — keyboard submit via chat_input, plus chip/quick-query prefill
+        typed = st.chat_input("Ask a data question…")
+        question = typed or st.session_state.pop("pending_q", None)
 
-        if submitted and user_input.strip():
-            question = user_input.strip()
-            messages.append({"role":"user","content":question})
-            with st.spinner("🤖 Thinking…"):
+        if question and question.strip():
+            question = question.strip()
+            messages.append({"role": "user", "content": question})
+            with st.chat_message("user", avatar="🧑"):
+                st.markdown(question)
+
+            session = conn_data["session"]
+            sql, df_res, answer, err = "", None, "", None
+            with st.chat_message("assistant", avatar="🤖"):
                 try:
-                    result = conn_data["session"].ask(question)
-                    df_res = result.get("data")
+                    with st.status("Working…", expanded=True) as status:
+                        status.update(label="✍️ Generating SQL…")
+                        sql = session.generate_sql_only(question)
+                        _accumulate_usage(conn_data)
+                        st.code(sql, language="sql")
+                        status.update(label="🗄️ Running query…")
+                        df_res = session.execute_sql(sql)
+                        status.update(label="✅ Done", state="complete")
+
+                    if df_res is not None and not df_res.empty:
+                        t_tbl, t_chart = st.tabs(["📋 Table", "📊 Chart"])
+                        with t_tbl:
+                            st.dataframe(df_res, use_container_width=True, height=260)
+                            st.caption(f"{len(df_res)} row(s)" + (
+                                " · truncated" if df_res.attrs.get("truncated") else ""))
+                        with t_chart:
+                            _chart_with_controls(df_res, key="live")
+
+                    answer = st.write_stream(
+                        session.summarize_stream(question, sql, df_res))
+                    _accumulate_usage(conn_data)
                     conn_data["total_queries"] = conn_data.get("total_queries", 0) + 1
-                    if df_res is not None:
-                        conn_data["total_rows"] = conn_data.get("total_rows", 0) + len(df_res)
-                    messages.append({
-                        "role":          "assistant",
-                        "content":       result["answer"],
-                        "sql":           result.get("sql",""),
-                        "df":            df_res,
-                        "error":         result.get("error"),
-                        "schema_source": result.get("schema_source","full"),
-                    })
-                except Exception as e:
-                    messages.append({
-                        "role":"assistant","content":"","sql":"","df":None,
-                        "error": f"Unexpected error: {e}\n\n{traceback.format_exc()}",
-                        "schema_source": "full",
-                    })
+                    conn_data["total_rows"] = conn_data.get("total_rows", 0) + (
+                        0 if df_res is None else len(df_res))
+                    conn_data["status"] = "live"
+                except Exception as e:  # pylint: disable=broad-exception-caught
+                    err = f"{e}"
+                    conn_data["status"] = "down"
+                    st.error(err, icon="🚫")
+
+            messages.append({
+                "role":          "assistant",
+                "question":      question,
+                "content":       answer,
+                "sql":           sql,
+                "df":            df_res,
+                "error":         err,
+                "schema_source": session.schema_source(),
+            })
             st.rerun()

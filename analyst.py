@@ -131,6 +131,46 @@ class AnalystSession:
 
         return result
 
+    # ── Streaming / step-wise API (used by the Streamlit UI) ───────────────────
+
+    def schema_source(self) -> str:
+        """Return 'vector' if a vector store is wired in, else 'full'."""
+        return "vector" if self._vs else "full"
+
+    def generate_sql_only(self, question: str) -> str:
+        """Generate (but do not execute) SQL for a question. Returns cleaned SQL."""
+        self.load_schema()
+        schema = self._get_relevant_schema(question)
+        dialect = getattr(self._db, "label", "SQL")
+        raw_sql = self._bedrock.generate_sql(
+            schema=schema,
+            question=question,
+            dialect=dialect,
+            history=self._history[-6:],
+        )
+        return self._clean_sql(raw_sql)
+
+    def execute_sql(self, sql: str) -> pd.DataFrame:
+        """Execute an arbitrary SELECT and return the resulting DataFrame."""
+        return self._db.query_df(sql)
+
+    def result_to_text(self, df: pd.DataFrame) -> str:
+        """Render a result DataFrame as text for the summarizer."""
+        return self._df_to_text(df)
+
+    def summarize_stream(self, question: str, sql: str, df: pd.DataFrame):
+        """Stream the natural-language summary, then commit the turn to history."""
+        result_text = self._df_to_text(df)
+        chunks: List[str] = []
+        for piece in self._bedrock.summarize_results_stream(question, sql, result_text):
+            chunks.append(piece)
+            yield piece
+        answer = "".join(chunks).strip()
+        self._history.append({"role": "user", "content": question})
+        self._history.append({"role": "assistant", "content": answer})
+        if len(self._history) > 20:
+            self._history = self._history[-20:]
+
     def general_chat(self, message: str) -> str:
         """Answer a general (non-SQL) question using the Bedrock model."""
         system = (
