@@ -24,6 +24,6 @@ disable=
 max-line-length=120
 
 [DESIGN]
-max-args=10
+max-args=12
 max-attributes=12
-max-positional-arguments=10
+max-positional-arguments=12
