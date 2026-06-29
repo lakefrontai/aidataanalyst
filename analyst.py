@@ -67,6 +67,7 @@ class AnalystSession:
     # ── Main entry point ──────────────────────────────────────────────────────
 
     def ask(self, question: str) -> dict:
+        """Run the full analyst pipeline: schema → SQL → execute → summarise."""
         self.load_schema()
 
         result: Dict = {

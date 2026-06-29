@@ -1028,7 +1028,8 @@ with tab_chat:
                 except Exception as e:
                     st.error(f"Preview failed: {e}")
             if st.button("✕ Close preview"):
-                del st.session_state["preview_table"]; st.rerun()
+                del st.session_state["preview_table"]
+                st.rerun()
 
         with st.expander("🗄️ Database Schema", expanded=False):
             st.code(conn_data.get("schema","Schema not loaded."), language="sql")
