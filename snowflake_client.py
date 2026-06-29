@@ -8,6 +8,8 @@ from db_base import BaseDBClient
 
 
 class SnowflakeClient(BaseDBClient):
+    """Snowflake connector using the official snowflake-connector-python."""
+
     label = "Snowflake"
 
     def __init__(

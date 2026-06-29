@@ -7,6 +7,7 @@ from db_base import BaseDBClient
 
 
 class MySQLClient(BaseDBClient):
+    """MySQL connector for local and AWS RDS / Aurora MySQL instances."""
 
     def __init__(
         self,
