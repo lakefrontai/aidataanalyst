@@ -13,8 +13,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.syntax import Syntax
 from rich.markdown import Markdown
-from rich import print as rprint
-
 from config import config
 from bedrock_client import BedrockMistralClient
 from fabric_client import FabricClient
@@ -49,6 +47,7 @@ HELP_TEXT = """
 
 
 def print_dataframe(df, title: str = "Results") -> None:
+    """Render a DataFrame as a Rich table in the terminal."""
     if df is None or df.empty:
         console.print("[yellow]No data returned.[/yellow]")
         return
@@ -101,10 +100,10 @@ def handle_command(cmd: str, session: AnalystSession, fabric: FabricClient) -> b
             print_dataframe(df, title=f"Sample: {arg}")
 
     elif command == "/history":
-        for i, msg in enumerate(session._history):
+        for msg in session._history:
             role = msg["role"].upper()
-            color = "cyan" if role == "USER" else "green"
-            console.print(f"[{color}][{role}][/{color}] {msg['content'][:200]}")
+            clr = "cyan" if role == "USER" else "green"
+            console.print(f"[{clr}][{role}][/{clr}] {msg['content'][:200]}")
 
     elif command == "/reset":
         session.reset_history()
@@ -117,6 +116,7 @@ def handle_command(cmd: str, session: AnalystSession, fabric: FabricClient) -> b
 
 
 def run() -> None:
+    """Main REPL entry point — connects Bedrock + Fabric and starts the CLI loop."""
     console.print(BANNER)
 
     # ── Validate config ───────────────────────────────────────────────────────

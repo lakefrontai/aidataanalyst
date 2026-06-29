@@ -1,12 +1,13 @@
 """MySQL connector — works for local and AWS RDS MySQL / Aurora MySQL."""
 
-from typing import List, Optional
+from typing import List
 import pandas as pd
 
 from db_base import BaseDBClient
 
 
 class MySQLClient(BaseDBClient):
+    """MySQL connector for local and AWS RDS / Aurora MySQL instances."""
 
     def __init__(
         self,
@@ -33,11 +34,11 @@ class MySQLClient(BaseDBClient):
     def connect(self) -> None:
         try:
             import mysql.connector
-        except ImportError:
+        except ImportError as exc:
             raise RuntimeError(
                 "mysql-connector-python is not installed.\n"
                 "Run:  pip install mysql-connector-python"
-            )
+            ) from exc
         ssl_args = {"ssl_disabled": True} if self.ssl_disabled else {}
         self._conn = mysql.connector.connect(
             host=self.host,

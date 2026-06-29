@@ -1,6 +1,6 @@
 """Fetch available Bedrock models live from the API."""
 
-from typing import List, Dict, Optional
+from typing import List, Dict
 import boto3
 from botocore.exceptions import ClientError
 

@@ -10,7 +10,6 @@ import os
 import sys
 import socket
 import subprocess
-import threading
 import time
 import webbrowser
 
@@ -70,6 +69,7 @@ def _start_streamlit(port: int) -> subprocess.Popen:
 
 
 def main():
+    """Start Streamlit server and open a native webview window (or browser fallback)."""
     port = _free_port()
     proc = _start_streamlit(port)
     url  = f"http://127.0.0.1:{port}"
@@ -86,14 +86,9 @@ def main():
         def on_closed():
             proc.terminate()
 
-        window = webview.create_window(
-            "AI Data Analyst",
-            url,
-            width=1280,
-            height=820,
-            min_size=(900, 600),
-        )
-        webview.start(on_closed)
+        webview.start(on_closed, webview.create_window(
+            "AI Data Analyst", url, width=1280, height=820, min_size=(900, 600),
+        ))
     except ImportError:
         # pywebview not available — open in default browser instead
         webbrowser.open(url)

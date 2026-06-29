@@ -8,6 +8,8 @@ from db_base import BaseDBClient
 
 
 class SnowflakeClient(BaseDBClient):
+    """Snowflake connector using the official snowflake-connector-python."""
+
     label = "Snowflake"
 
     def __init__(
@@ -33,14 +35,14 @@ class SnowflakeClient(BaseDBClient):
         self._schema_cache: str = ""
 
     def connect(self) -> None:
-        kwargs = dict(
-            account=self.account,
-            user=self.user,
-            password=self.password,
-            warehouse=self.warehouse,
-            database=self.database,
-            schema=self.schema,
-        )
+        kwargs = {
+            "account": self.account,
+            "user": self.user,
+            "password": self.password,
+            "warehouse": self.warehouse,
+            "database": self.database,
+            "schema": self.schema,
+        }
         if self.role:
             kwargs["role"] = self.role
         self._conn = snowflake.connector.connect(**kwargs)

@@ -9,6 +9,7 @@ from db_base import BaseDBClient
 
 
 class PostgresClient(BaseDBClient):
+    """PostgreSQL connector for local and AWS RDS instances."""
 
     def __init__(
         self,

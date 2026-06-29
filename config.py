@@ -1,3 +1,5 @@
+"""Application configuration loaded from environment variables / .env file."""
+
 import os
 from typing import List
 from dotenv import load_dotenv
@@ -6,6 +8,7 @@ load_dotenv()
 
 
 class Config:
+    """Centralised config — reads from environment variables with sensible defaults."""
     # AWS / Bedrock
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
@@ -32,6 +35,7 @@ class Config:
     MAX_SCHEMA_TABLES: int = int(os.getenv("MAX_SCHEMA_TABLES", "100"))
 
     def validate(self) -> List[str]:
+        """Return a list of missing/invalid config error messages."""
         errors = []
         if not self.AWS_ACCESS_KEY_ID:
             errors.append("AWS_ACCESS_KEY_ID is not set")

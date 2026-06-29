@@ -10,7 +10,7 @@ Flow for each user question:
 """
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 import pandas as pd
 from tabulate import tabulate
 
@@ -38,11 +38,13 @@ class AnalystSession:
     # ── Schema loading ────────────────────────────────────────────────────────
 
     def load_schema(self, force: bool = False) -> str:
+        """Load and cache the full database schema; re-fetch if force=True."""
         if not self._schema or force:
             self._schema = self._db.get_schema(force_refresh=force)
         return self._schema
 
     def set_vector_store(self, vs) -> None:
+        """Attach a SchemaVectorStore for semantic table retrieval."""
         self._vs = vs
 
     # ── Schema retrieval ──────────────────────────────────────────────────────
@@ -65,6 +67,7 @@ class AnalystSession:
     # ── Main entry point ──────────────────────────────────────────────────────
 
     def ask(self, question: str) -> dict:
+        """Run the full analyst pipeline: schema → SQL → execute → summarise."""
         self.load_schema()
 
         result: Dict = {
@@ -129,6 +132,7 @@ class AnalystSession:
         return result
 
     def general_chat(self, message: str) -> str:
+        """Answer a general (non-SQL) question using the Bedrock model."""
         system = (
             "You are an AI data analyst assistant. Answer helpfully. "
             "If the question is about data, let the user know they can ask "
@@ -140,6 +144,7 @@ class AnalystSession:
         return response
 
     def reset_history(self) -> None:
+        """Clear the conversation history."""
         self._history = []
 
     # ── Helpers ───────────────────────────────────────────────────────────────

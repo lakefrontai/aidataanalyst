@@ -1,7 +1,6 @@
 """AWS Bedrock client — uses Converse API for all Mistral models."""
 
 import re
-import json
 from typing import Optional, List, Dict
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -10,6 +9,7 @@ from config import config
 
 
 class BedrockMistralClient:
+    """AWS Bedrock client using the Converse API (supports all model families)."""
 
     def __init__(self):
         self._client = boto3.client(
@@ -39,19 +39,19 @@ class BedrockMistralClient:
             if m["role"] in ("user", "assistant")
         ]
 
-        kwargs = dict(
-            modelId=self.model_id,
-            messages=converse_msgs,
-            inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
-        )
+        kwargs = {
+            "modelId": self.model_id,
+            "messages": converse_msgs,
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
+        }
         if system:
             kwargs["system"] = [{"text": system}]
 
         try:
             resp = self._client.converse(**kwargs)
             return resp["output"]["message"]["content"][0]["text"].strip()
-        except NoCredentialsError:
-            raise RuntimeError("AWS credentials not found.")
+        except NoCredentialsError as exc:
+            raise RuntimeError("AWS credentials not found.") from exc
         except ClientError as e:
             code = e.response["Error"]["Code"]
             msg  = e.response["Error"]["Message"]
@@ -89,6 +89,7 @@ class BedrockMistralClient:
     # ── Public helpers ────────────────────────────────────────────────────────
 
     def chat(self, system: str, user: str, history: Optional[List[Dict]] = None) -> str:
+        """Send a chat message with optional history and return the model response."""
         msgs: List[Dict] = []
         if history:
             msgs.extend([m for m in history if m["role"] in ("user", "assistant")])
@@ -97,6 +98,7 @@ class BedrockMistralClient:
 
     def generate_sql(self, schema: str, question: str, dialect: str = "PostgreSQL",
                      history: Optional[List[Dict]] = None) -> str:
+        """Generate a SQL query from a natural-language question and schema."""
         system = (
             f"You are an expert {dialect} SQL developer and data analyst.\n"
             "Your ONLY job is to output a single valid SQL SELECT query — nothing else.\n\n"
@@ -111,15 +113,16 @@ class BedrockMistralClient:
             "with a table alias (e.g. t1.org_id, NOT org_id). Ambiguous column references are a fatal error.\n"
             "8. Assign a short alias to every table (e.g. FROM disputes d, orgs o) and use those aliases everywhere.\n"
             "9. NEVER add WHERE clause filters for column values not explicitly mentioned in the question. "
-            "For example, if the user says 'disputes created last week', do NOT filter by status — "
-            "'created' describes when rows were inserted (the created_at timestamp), not a status value.\n"
-            "10. When grouping by date/day, use DATE(col) or DATE_TRUNC('day', col) — never group by a raw timestamp.\n\n"
+            "For example, 'disputes created last week' filters by date, NOT by a status column.\n"
+            "10. When grouping by date/day, use DATE(col) or DATE_TRUNC('day', col) — "
+            "never group by a raw timestamp.\n\n"
             f"DATABASE SCHEMA:\n{schema}"
         )
         raw = self.chat(system, question, history)
         return self._clean_sql(raw)
 
     def summarize_results(self, question: str, sql: str, result_text: str) -> str:
+        """Summarize query results in plain English."""
         system = (
             "You are a helpful data analyst. Summarize the query results in clear natural language. "
             "Highlight key numbers, trends, or anomalies. Be concise."
@@ -132,6 +135,7 @@ class BedrockMistralClient:
         return self.chat(system, user)
 
     def clarify(self, question: str, error: str) -> str:
+        """Ask the model to explain a SQL error and suggest a correction."""
         system = (
             "You are a SQL debugging assistant. "
             "Explain the error cause in one sentence, then provide a corrected SQL query."

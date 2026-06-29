@@ -18,8 +18,9 @@ _AAD_TOKEN_URL = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 
 
 class FabricClient(BaseDBClient):
-    label = "Microsoft Fabric"
     """Connects to Microsoft Fabric via its SQL Analytics Endpoint (T-SQL)."""
+
+    label = "Microsoft Fabric"
 
     def __init__(self):
         self._conn: Optional[pyodbc.Connection] = None
