@@ -19,6 +19,8 @@ class BedrockMistralClient:
             aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
         )
         self.model_id = config.BEDROCK_MODEL_ID
+        # Token usage from the most recent invocation (input/output token counts)
+        self.last_usage: Dict[str, int] = {"inputTokens": 0, "outputTokens": 0}
 
     # ── Core invoke via Converse API ──────────────────────────────────────────
 
@@ -49,6 +51,7 @@ class BedrockMistralClient:
 
         try:
             resp = self._client.converse(**kwargs)
+            self.last_usage = resp.get("usage", self.last_usage)
             return resp["output"]["message"]["content"][0]["text"].strip()
         except NoCredentialsError as exc:
             raise RuntimeError("AWS credentials not found.") from exc
@@ -95,6 +98,53 @@ class BedrockMistralClient:
             msgs.extend([m for m in history if m["role"] in ("user", "assistant")])
         msgs.append({"role": "user", "content": user})
         return self._invoke(system, msgs)
+
+    def _invoke_stream(self, system: str, user: str):
+        """Yield response text chunks via the Bedrock ConverseStream API.
+
+        Falls back to a non-streaming call (prepending the system prompt) for
+        models that reject system messages."""
+        converse_msgs = [{"role": "user", "content": [{"text": user}]}]
+        kwargs = {
+            "modelId": self.model_id,
+            "messages": converse_msgs,
+            "inferenceConfig": {"maxTokens": 2048, "temperature": 0.0},
+        }
+        if system:
+            kwargs["system"] = [{"text": system}]
+        try:
+            resp = self._client.converse_stream(**kwargs)
+        except ClientError as e:
+            code = e.response["Error"]["Code"]
+            msg = e.response["Error"]["Message"]
+            if code == "ValidationException" and "system" in msg.lower():
+                merged = [{"role": "user", "content": [{"text": f"{system}\n\n{user}"}]}]
+                resp = self._client.converse_stream(
+                    modelId=self.model_id,
+                    messages=merged,
+                    inferenceConfig={"maxTokens": 2048, "temperature": 0.0},
+                )
+            else:
+                raise RuntimeError(f"Bedrock error [{code}]: {msg}") from e
+
+        for event in resp["stream"]:
+            if "contentBlockDelta" in event:
+                yield event["contentBlockDelta"]["delta"].get("text", "")
+            elif "metadata" in event:
+                self.last_usage = event["metadata"].get("usage", self.last_usage)
+
+    def summarize_results_stream(self, question: str, sql: str, result_text: str):
+        """Stream a plain-English summary of query results, chunk by chunk."""
+        system = (
+            "You are a helpful data analyst. Summarize the query results in clear natural language. "
+            "Highlight key numbers, trends, or anomalies. Be concise."
+        )
+        user = (
+            f"Question: {question}\n\n"
+            f"SQL run:\n{sql}\n\n"
+            f"Results:\n{result_text}"
+        )
+        yield from self._invoke_stream(system, user)
 
     def generate_sql(self, schema: str, question: str, dialect: str = "PostgreSQL",
                      history: Optional[List[Dict]] = None) -> str:
