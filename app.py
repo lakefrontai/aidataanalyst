@@ -11,7 +11,6 @@ import plotly.express as px
 import streamlit as st
 import boto3
 
-from config import Config
 from bedrock_client import BedrockMistralClient
 from fabric_client import FabricClient
 from snowflake_client import SnowflakeClient
@@ -133,7 +132,8 @@ def _auto_chart(df: pd.DataFrame):
             st.info("Could not determine a suitable chart type.")
             return
         fig.update_layout(plot_bgcolor="#ffffff", paper_bgcolor="#f5f7fa",
-                          font_color="#1a1a2e", margin=dict(l=20,r=20,t=40,b=20))
+                          font_color="#1a1a2e",
+                          margin={"l": 20, "r": 20, "t": 40, "b": 20})
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.info(f"Auto-chart unavailable: {e}")
@@ -429,7 +429,7 @@ with tab_conn:
         st.info("No connections yet. Add one below.")
     else:
         for cname, cdata in list(connections.items()):
-            is_active = (cname == st.session_state.active_conn)
+            is_active = cname == st.session_state.active_conn
             icon_map = {
                 "snowflake": "❄️", "fabric": "🏭",
                 "pgaws": "🐘", "pglocal": "💻", "mysql": "🐬",
@@ -510,10 +510,11 @@ with tab_conn:
             elif conn_name in connections:
                 st.error(f"A connection named '{conn_name}' already exists.")
             else:
-                st.session_state.sf_saved = dict(
-                    account=sf_account, user=sf_user, password=sf_password,
-                    warehouse=sf_warehouse, database=sf_database,
-                    schema=sf_schema, role=sf_role, max_rows=sf_maxrows)
+                st.session_state.sf_saved = {
+                    "account": sf_account, "user": sf_user, "password": sf_password,
+                    "warehouse": sf_warehouse, "database": sf_database,
+                    "schema": sf_schema, "role": sf_role, "max_rows": sf_maxrows,
+                }
                 with st.spinner("Connecting…"):
                     try:
                         _add_connection(conn_name, SnowflakeClient(
@@ -567,11 +568,12 @@ with tab_conn:
             elif conn_name in connections:
                 st.error(f"A connection named '{conn_name}' already exists.")
             else:
-                st.session_state.fab_saved = dict(
-                    server=fab_server, database=fab_db,
-                    auth="sp" if fab_auth=="Service Principal" else "up",
-                    tenant=fab_tenant, client_id=fab_cid, client_secret=fab_csec,
-                    username=fab_user, password_up=fab_pass, max_rows=fab_maxrows)
+                st.session_state.fab_saved = {
+                    "server": fab_server, "database": fab_db,
+                    "auth": "sp" if fab_auth == "Service Principal" else "up",
+                    "tenant": fab_tenant, "client_id": fab_cid, "client_secret": fab_csec,
+                    "username": fab_user, "password_up": fab_pass, "max_rows": fab_maxrows,
+                }
                 cfg_module.config.FABRIC_SERVER        = fab_server
                 cfg_module.config.FABRIC_DATABASE      = fab_db
                 cfg_module.config.FABRIC_TENANT_ID     = fab_tenant
@@ -616,10 +618,11 @@ with tab_conn:
             elif conn_name in connections:
                 st.error(f"A connection named '{conn_name}' already exists.")
             else:
-                st.session_state.pgaws_saved = dict(
-                    host=pgaws_host, port=int(pgaws_port), database=pgaws_db,
-                    user=pgaws_user, password=pgaws_pass, sslmode=pgaws_ssl,
-                    max_rows=pgaws_maxrows)
+                st.session_state.pgaws_saved = {
+                    "host": pgaws_host, "port": int(pgaws_port), "database": pgaws_db,
+                    "user": pgaws_user, "password": pgaws_pass, "sslmode": pgaws_ssl,
+                    "max_rows": pgaws_maxrows,
+                }
                 with st.spinner("Connecting…"):
                     try:
                         _add_connection(conn_name, PostgresClient(
@@ -657,10 +660,11 @@ with tab_conn:
             elif conn_name in connections:
                 st.error(f"A connection named '{conn_name}' already exists.")
             else:
-                st.session_state.pgloc_saved = dict(
-                    host=pgl_host, port=int(pgl_port), database=pgl_db,
-                    user=pgl_user, password=pgl_pass, sslmode=pgl_ssl,
-                    max_rows=pgl_maxrows)
+                st.session_state.pgloc_saved = {
+                    "host": pgl_host, "port": int(pgl_port), "database": pgl_db,
+                    "user": pgl_user, "password": pgl_pass, "sslmode": pgl_ssl,
+                    "max_rows": pgl_maxrows,
+                }
                 with st.spinner("Connecting…"):
                     try:
                         _add_connection(conn_name, PostgresClient(
@@ -700,10 +704,11 @@ with tab_conn:
             elif conn_name in connections:
                 st.error(f"A connection named '{conn_name}' already exists.")
             else:
-                st.session_state.mysql_saved = dict(
-                    host=my_host, port=int(my_port), database=my_db,
-                    user=my_user, password=my_pass, ssl_disabled=my_ssl,
-                    max_rows=my_maxrows, label=my_label)
+                st.session_state.mysql_saved = {
+                    "host": my_host, "port": int(my_port), "database": my_db,
+                    "user": my_user, "password": my_pass, "ssl_disabled": my_ssl,
+                    "max_rows": my_maxrows, "label": my_label,
+                }
                 with st.spinner("Connecting…"):
                     try:
                         _add_connection(conn_name, MySQLClient(
@@ -788,17 +793,24 @@ docker run -e POSTGRES_PASSWORD=pass -p 5432:5432 pgvector/pgvector:pg17
                 min_value=1, max_value=65535, key="vs_port")
             vs_pass = st.text_input("Password", type="password",
                 value=s.get("password",""), key="vs_pass")
-            vs_ssl  = st.selectbox("SSL mode", ["disable","prefer","require"],
-                index=["disable","prefer","require"].index(s.get("sslmode","disable")),
+            _ssl_opts = ["disable", "prefer", "require"]
+            vs_ssl = st.selectbox("SSL mode", _ssl_opts,
+                index=_ssl_opts.index(s.get("sslmode", "disable")),
                 key="vs_ssl")
 
         EMBED_MODELS = {
-            "amazon.titan-embed-text-v2:0":   ("Amazon", "Titan Text Embeddings v2",    1024, "Best balance. Recommended."),
-            "amazon.titan-embed-text-v1":      ("Amazon", "Titan Text Embeddings v1",    1536, "Older Titan, higher dim."),
-            "amazon.titan-embed-image-v1":     ("Amazon", "Titan Multimodal Embeddings", 1024, "Text + image inputs."),
-            "cohere.embed-english-v3":         ("Cohere", "Embed English v3",            1024, "High quality English."),
-            "cohere.embed-multilingual-v3":    ("Cohere", "Embed Multilingual v3",       1024, "100+ languages."),
-            "amazon.nova-embed-text-v1:0":     ("Amazon", "Nova Embed Text v1",          1024, "Latest Amazon Nova model."),
+            "amazon.titan-embed-text-v2:0": ("Amazon", "Titan Text Embeddings v2", 1024,
+                                             "Best balance. Recommended."),
+            "amazon.titan-embed-text-v1":   ("Amazon", "Titan Text Embeddings v1", 1536,
+                                             "Older Titan, higher dim."),
+            "amazon.titan-embed-image-v1":  ("Amazon", "Titan Multimodal Embeddings", 1024,
+                                             "Text + image inputs."),
+            "cohere.embed-english-v3":      ("Cohere", "Embed English v3", 1024,
+                                             "High quality English."),
+            "cohere.embed-multilingual-v3": ("Cohere", "Embed Multilingual v3", 1024,
+                                             "100+ languages."),
+            "amazon.nova-embed-text-v1:0":  ("Amazon", "Nova Embed Text v1", 1024,
+                                             "Latest Amazon Nova model."),
         }
         embed_options = list(EMBED_MODELS.keys())
         default_embed = s.get("embed_model", "amazon.titan-embed-text-v2:0")
@@ -819,10 +831,11 @@ docker run -e POSTGRES_PASSWORD=pass -p 5432:5432 pgvector/pgvector:pg17
         ca, cb = st.columns([3,1])
         with ca:
             if st.button("🔌 Connect pgvector", key="conn_vs", use_container_width=True):
-                st.session_state.vs_saved = dict(
-                    host=vs_host, port=int(vs_port), database=vs_db,
-                    user=vs_user, password=vs_pass, sslmode=vs_ssl,
-                    embed_model=vs_embed)
+                st.session_state.vs_saved = {
+                    "host": vs_host, "port": int(vs_port), "database": vs_db,
+                    "user": vs_user, "password": vs_pass, "sslmode": vs_ssl,
+                    "embed_model": vs_embed,
+                }
                 with st.spinner("Connecting to pgvector…"):
                     try:
                         new_vs = SchemaVectorStore(
@@ -847,8 +860,10 @@ docker run -e POSTGRES_PASSWORD=pass -p 5432:5432 pgvector/pgvector:pg17
         with cb:
             if vs_connected and st.button("Disconnect", key="disc_vs", use_container_width=True):
                 if vs:
-                    try: vs.disconnect()
-                    except Exception: pass
+                    try:
+                        vs.disconnect()
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        pass
                 st.session_state.vs = None
                 st.session_state.vs_connected = False
                 st.session_state.vs_indexed_count = 0

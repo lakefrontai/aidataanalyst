@@ -1,11 +1,24 @@
 [MASTER]
-# Ignore generated/vendored paths
 ignore=web,build,dist
+# pyodbc is a C extension — allow member introspection at runtime
+extension-pkg-allow-list=pyodbc
 
 [MESSAGES CONTROL]
-# R0801: duplicate-code — connectors intentionally share structural patterns
-# W0212: protected-access — session._history access in main.py CLI is intentional
-disable=R0801,W0212
+disable=
+    # Structural — intentional patterns not worth refactoring
+    R0801,   # duplicate-code: connectors share structural patterns by design
+    R0912,   # too-many-branches: CLI command handler is necessarily branchy
+    R0915,   # too-many-statements: CLI run() is a REPL loop, intentionally large
+    R0903,   # too-few-public-methods: Config is a data class, one method is enough
+    C0302,   # too-many-lines: app.py is a single-file Streamlit app by design
+    # Streamlit-specific patterns
+    W0621,   # redefined-outer-name: Streamlit scripts reuse variable names across renders
+    C0103,   # invalid-name: Streamlit local vars (vs_connected, _name_key, etc.) flagged as constants
+    # Exception handling — broad catches are intentional in UI/connector code
+    W0718,   # broad-exception-caught
+    # Import style
+    C0415,   # import-outside-toplevel: mysql.connector lazy import is intentional
+    W0212,   # protected-access: CLI accesses session._history intentionally
 
 [FORMAT]
 max-line-length=120
