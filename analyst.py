@@ -12,11 +12,25 @@ Flow for each user question:
 import re
 from typing import Dict, List
 import pandas as pd
+import sqlparse
+from sqlparse.tokens import Keyword
 from tabulate import tabulate
 
 from bedrock_client import BedrockMistralClient
 from db_base import BaseDBClient
 from config import config
+
+# Keywords that indicate a write/DDL/admin statement — never allowed, even
+# if they show up mid-query (e.g. "SELECT ... ; DROP TABLE ...").
+_FORBIDDEN_KEYWORDS = {
+    "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE",
+    "GRANT", "REVOKE", "MERGE", "REPLACE", "CALL", "EXEC", "EXECUTE",
+    "ATTACH", "DETACH", "VACUUM", "COPY", "INTO", "SET",
+}
+
+
+class UnsafeSQLError(RuntimeError):
+    """Raised when a query isn't a single, plain read-only SELECT/WITH statement."""
 
 
 class AnalystSession:
@@ -100,6 +114,7 @@ class AnalystSession:
 
         # ── 3. Execute ────────────────────────────────────────────────────────
         try:
+            self._ensure_readonly(sql)
             df = self._db.query_df(sql)
             result["data"] = df
         except Exception as e:
@@ -152,6 +167,7 @@ class AnalystSession:
 
     def execute_sql(self, sql: str) -> pd.DataFrame:
         """Execute an arbitrary SELECT and return the resulting DataFrame."""
+        self._ensure_readonly(sql)
         return self._db.query_df(sql)
 
     def result_to_text(self, df: pd.DataFrame) -> str:
@@ -188,6 +204,35 @@ class AnalystSession:
         self._history = []
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _ensure_readonly(sql: str) -> None:
+        """Reject anything that isn't a single, plain SELECT/WITH statement.
+
+        Applies to both LLM-generated SQL and user-edited "re-run" SQL from
+        the UI — this is the last line of defense before a query touches the
+        database, so it must not rely on the model having followed
+        instructions in its system prompt.
+        """
+        statements = [
+            stmt for stmt in sqlparse.parse(sql)
+            if stmt.token_first(skip_cm=True) is not None
+        ]
+        if len(statements) != 1:
+            raise UnsafeSQLError(
+                "Only a single SELECT statement is allowed (no multi-statement SQL)."
+            )
+
+        stmt = statements[0]
+        first = stmt.token_first(skip_cm=True)
+        if first is None or first.value.upper() not in ("SELECT", "WITH"):
+            raise UnsafeSQLError("Only SELECT / WITH queries are allowed.")
+
+        for token in stmt.flatten():
+            if token.ttype in Keyword and token.value.upper() in _FORBIDDEN_KEYWORDS:
+                raise UnsafeSQLError(
+                    f"'{token.value.upper()}' is not allowed — read-only queries only."
+                )
 
     @staticmethod
     def _clean_sql(raw: str) -> str:

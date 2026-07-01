@@ -8,7 +8,7 @@ export default function Navbar() {
         <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
           <BarChart2 size={17} className="text-white" />
         </div>
-        <span className="font-semibold text-sm">AI Data Analyst</span>
+        <span className="font-semibold text-sm">MyDataTalk</span>
       </div>
 
       <div className="hidden md:flex items-center gap-1">
@@ -29,6 +29,15 @@ export default function Navbar() {
         >
           <ExternalLink size={14} />
           GitHub
+        </Link>
+        <Link href="/login" className="ml-2 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 px-3 py-2 rounded-md transition-colors">
+          Log in
+        </Link>
+        <Link
+          href="/register"
+          className="flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          Sign up
         </Link>
       </div>
     </nav>
