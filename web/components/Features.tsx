@@ -43,7 +43,7 @@ const features: Feature[] = [
     icon: ShieldCheck,
     iconColor: "text-zinc-400",
     title: "Read-only safe",
-    desc: "Only SELECT queries are allowed. DROP, DELETE, UPDATE, and INSERT are blocked at the prompt level.",
+    desc: "Only single SELECT statements run. Multi-statement SQL and any write or DDL keyword are rejected before they reach your database.",
   },
 ];
 

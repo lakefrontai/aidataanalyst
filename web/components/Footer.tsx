@@ -5,7 +5,7 @@ export default function Footer() {
   return (
     <footer className="px-8 py-5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between flex-wrap gap-4">
       <span className="text-xs text-zinc-400">
-        AI Data Analyst — open source under MIT
+        MyDataTalk — open source under MIT
       </span>
       <div className="flex items-center gap-5">
         <Link

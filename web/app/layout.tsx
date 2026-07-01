@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Providers from "./providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,13 +14,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Data Analyst — Ask your data anything",
+  metadataBase: new URL("https://mydatatalk.ai"),
+  title: "MyDataTalk — Ask your data anything",
   description:
     "Connect any database, pick any AWS Bedrock model, and query in plain English. Get SQL, charts, and answers — no SQL required.",
   openGraph: {
-    title: "AI Data Analyst",
+    title: "MyDataTalk",
     description: "Plain English → SQL → Results. Any Bedrock model. Multiple databases.",
+    url: "https://mydatatalk.ai",
+    siteName: "MyDataTalk",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "MyDataTalk",
+    description: "Plain English → SQL → Results. Any Bedrock model. Multiple databases.",
   },
 };
 
@@ -33,7 +42,9 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
